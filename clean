@@ -13,8 +13,12 @@
 #   -T, --trash     Vacía la papelera del usuario
 #   -m, --thumbs    Limpia miniaturas y cachés de usuario
 #   -b, --browsers  Limpia la caché de los navegadores (Firefox, Chrome, etc.)
-#   -r, --ram       Libera la caché del kernel en RAM (page/buffer cache)
+#   -r, --ram       Libera page/buffer cache y swap
 #   -d, --drives    Limpia papeleras y temporales de unidades montadas
+#   -u, --user-cache Limpia ~/.cache/ completo y ~/.nv/ (NVIDIA)
+#   -D, --dev       Limpia cachés de desarrollo (.gradle, .npm, .cargo, pip, etc.)
+#   -j, --junk      Busca y borra archivos basura seguros (*.swp, *.pyc, .DS_Store, etc.)
+#   -s, --status    Muestra el uso de disco antes y después de la limpieza
 #   -n, --dry-run   Muestra lo que se haría sin borrar nada
 #   -h, --help      Muestra esta ayuda
 #
@@ -65,8 +69,12 @@ Opciones:
   -T, --trash     Vacía la papelera del usuario
   -m, --thumbs    Limpia miniaturas y cachés de usuario
   -b, --browsers  Limpia la caché de los navegadores (Firefox, Chrome, etc.)
-  -r, --ram       Libera la caché del kernel en RAM (page/buffer cache)
+  -r, --ram       Libera page/buffer cache del kernel y swap
   -d, --drives    Limpia papeleras y temporales de unidades montadas
+  -u, --user-cache Limpia ~/.cache/ completo y ~/.nv/ (NVIDIA)
+  -D, --dev       Limpia cachés de desarrollo (.gradle, .npm, .cargo, pip, etc.)
+  -j, --junk      Busca y borra archivos basura seguros (*.swp, *.pyc, .DS_Store, etc.)
+  -s, --status    Muestra el uso de disco antes y después de la limpieza
   -n, --dry-run   Muestra lo que se haría sin borrar nada
   -h, --help      Muestra esta ayuda
 EOF
@@ -130,6 +138,15 @@ clean_logs() {
   fi
   run "$SUDO find /var/log -type f -name '*.gz' -delete 2>/dev/null"
   run "$SUDO find /var/log -type f -regextype posix-extended -regex '.*\.[0-9]+$' -delete 2>/dev/null"
+  # Coredumps de systemd (volcados de memoria)
+  if [ -d /var/lib/systemd/coredump ]; then
+    local cdump
+    cdump=$(find /var/lib/systemd/coredump -type f -size +0 2>/dev/null | wc -l)
+    if [ "$cdump" -gt 0 ]; then
+      c_info "Eliminando ${cdump} volcado(s) de memoria (coredump)..."
+      run "$SUDO rm -rf /var/lib/systemd/coredump/* 2>/dev/null"
+    fi
+  fi
   c_ok "Logs limpiados."
 }
 
@@ -155,10 +172,11 @@ clean_browsers() {
   local cache="${XDG_CACHE_HOME:-$HOME/.cache}"
   local cfg="${XDG_CONFIG_HOME:-$HOME/.config}"
 
-  local browsers="firefox firefox-esr firefox-bin chrome chromium chromium-browser brave brave-browser opera vivaldi-bin microsoft-edge msedge"
+  # Mapa de procesos para detectar navegadores abiertos
+  local browsers_procs="firefox firefox-esr firefox-bin chrome chromium chromium-browser brave brave-browser opera vivaldi-bin microsoft-edge msedge librewolf floorp waterfox tor-browser palemoon basilisk falkon qutebrowser midori epiphany zen"
   local open=""
   local b
-  for b in $browsers; do
+  for b in $browsers_procs; do
     if pgrep -x -u "$(id -u)" "$b" >/dev/null 2>&1; then
       open="$open $b"
     fi
@@ -167,26 +185,82 @@ clean_browsers() {
     c_warn "Navegadores abiertos:$open (ciérralos para una limpieza completa)."
   fi
 
-  # Navegadores basados en Chromium (caché por perfil)
-  local chromium_dirs=(
-    "$cfg/google-chrome" "$cfg/chromium" "$cfg/BraveSoftware/Brave-Browser"
-    "$cfg/opera" "$cfg/vivaldi" "$cfg/microsoft-edge"
-  )
-  for base in "${chromium_dirs[@]}"; do
+  # ---- Navegadores (nombre → directorio de config) ----
+  # Cada entrada: "Label|ruta_config"
+  declare -A BROWSERS=()
+
+  # Chromium / Blink
+  BROWSERS["Google Chrome"]="$cfg/google-chrome"
+  BROWSERS["Chromium"]="$cfg/chromium"
+  BROWSERS["Brave"]="$cfg/BraveSoftware/Brave-Browser"
+  BROWSERS["Microsoft Edge"]="$cfg/microsoft-edge"
+  BROWSERS["Opera"]="$cfg/opera"
+  BROWSERS["Vivaldi"]="$cfg/vivaldi"
+  BROWSERS["qutebrowser"]="$cfg/qutebrowser"
+  BROWSERS["Falkon"]="$cfg/falkon"
+  BROWSERS["Midori"]="$cfg/midori"
+  BROWSERS["Iridium"]="$cfg/iridium"
+  BROWSERS["Slimjet"]="$cfg/slimjet"
+  BROWSERS["Dissenter"]="$cfg/dissenter"
+  BROWSERS["Epiphany (GNOME Web)"]="$cfg/epiphany"
+  BROWSERS["Ghostery"]="$cfg/Ghostery"
+
+  # Firefox / Gecko
+  BROWSERS["Firefox"]="$HOME/.mozilla/firefox"
+  BROWSERS["LibreWolf"]="$HOME/.librewolf"
+  BROWSERS["Floorp"]="$HOME/.floorp"
+  BROWSERS["Waterfox"]="$HOME/.waterfox"
+  BROWSERS["Zen Browser"]="$HOME/.zen"
+  BROWSERS["Pale Moon"]="$HOME/.moonchild productions/pale moon"
+  BROWSERS["Basilisk"]="$HOME/.moonchild productions/basilisk"
+  BROWSERS["Tor Browser"]="$HOME/.tor-browser"
+
+  local found=0
+
+  for name in "${!BROWSERS[@]}"; do
+    local base="${BROWSERS[$name]}"
     [ -d "$base" ] || continue
-    c_info "  ${base##*/}"
-    run "rm -rf '$base'/*/Cache/* '$base'/*/'Code Cache'/* '$base'/*/GPUCache/* '$base'/*/ShaderCache/* 2>/dev/null"
+    found=$((found + 1))
+
+    case "$name" in
+      # ---- Navegadores basados en Chromium/Blink ----
+      "Google Chrome"|"Chromium"|"Brave"|"Microsoft Edge"|"Opera"|"Vivaldi"|"Falkon"|"Midori"|"Iridium"|"Slimjet"|"Dissenter"|"Ghostery")
+        c_info "  $name"
+        run "rm -rf '$base'/*/Cache/* '$base'/*/'Code Cache'/* '$base'/*/GPUCache/* '$base'/*/ShaderCache/* 2>/dev/null"
+        ;;
+
+      # ---- qutebrowser (cache separado en ~/.cache) ----
+      "qutebrowser")
+        c_info "  $name"
+        run "rm -rf '$cache/qutebrowser/'* '$base/'*/webengine/Cache/* 2>/dev/null"
+        ;;
+
+      # ---- Epiphany (GNOME Web / WebKit) ----
+      "Epiphany (GNOME Web)")
+        c_info "  $name"
+        run "rm -rf '$cache/epiphany/'* 2>/dev/null"
+        ;;
+
+      # ---- Navegadores basados en Firefox / Gecko ----
+      *)
+        c_info "  $name"
+        run "rm -rf '$base/'*/cache2/* '$base/'*/startupCache/* '$base/'*/thumbnails/* 2>/dev/null"
+        ;;
+    esac
   done
 
-  # Cachés de Chromium ubicadas en ~/.cache
-  for d in google-chrome chromium BraveSoftware opera vivaldi microsoft-edge; do
-    [ -d "$cache/$d" ] && { c_info "  cache/$d"; run "rm -rf '$cache/$d/'* 2>/dev/null"; }
+  # Cachés adicionales en ~/.cache (Chromium-based que guardan cache acá)
+  for d in google-chrome chromium BraveSoftware opera vivaldi microsoft-edge falkon midori iridium slimjet epiphany; do
+    if [ -d "$cache/$d" ] && [ -n "$(ls -A "$cache/$d" 2>/dev/null)" ]; then
+      c_info "  ~/.cache/$d"
+      run "rm -rf '$cache/$d/'* 2>/dev/null"
+    fi
   done
 
-  # Firefox (perfiles en ~/.cache y ~/.mozilla)
-  if [ -d "$cache/mozilla/firefox" ]; then
-    c_info "  firefox"
-    run "rm -rf '$cache/mozilla/firefox/'*/cache2/* '$cache/mozilla/firefox/'*/startupCache/* 2>/dev/null"
+  if [ "$found" -eq 0 ]; then
+    c_info "  No se detectaron navegadores instalados."
+  else
+    c_info "  $found navegador(es) detectado(s) y limpiado(s)."
   fi
 
   c_ok "Caché de navegadores limpiada."
@@ -203,6 +277,21 @@ clean_ram() {
     c_info "  Después: $(free -h | awk '/Mem:/{print "usada "$3", cache "$6}')"
   fi
   c_ok "Caché de RAM liberada (no se borraron datos)."
+
+  # Limpiar swap (manda todo de vuelta a RAM si hay espacio)
+  if command -v swapon >/dev/null 2>&1; then
+    local swaps
+    swaps=$(swapon --show=NAME --noheadings 2>/dev/null | wc -l)
+    if [ "$swaps" -gt 0 ]; then
+      c_info "Vaciando swap (swapoff/on)..."
+      if [ "$DRY_RUN" -eq 0 ]; then
+        $SUDO swapoff -a 2>/dev/null && $SUDO swapon -a 2>/dev/null || c_warn "No se pudo vaciar el swap (RAM insuficiente?)."
+      else
+        printf '    \033[2m(dry-run)\033[0m sudo swapoff -a && sudo swapon -a\n'
+      fi
+    fi
+  fi
+  c_ok "RAM y swap limpiados."
 }
 
 clean_drives() {
@@ -221,19 +310,167 @@ clean_drives() {
     run "$SUDO find '$mp' -maxdepth 3 -type d -name '.Trash-*' -exec rm -rf {} + 2>/dev/null"
     run "$SUDO find '$mp' -maxdepth 3 -type d -iname '\$RECYCLE.BIN' -exec rm -rf {} + 2>/dev/null"
     run "$SUDO find '$mp' -maxdepth 2 -type f -name 'Thumbs.db' -delete 2>/dev/null"
+    run "$SUDO find '$mp' -maxdepth 2 -type f -name '.DS_Store' -delete 2>/dev/null"
   done <<< "$mounts"
   c_ok "Unidades limpiadas."
+}
+
+clean_user_cache() {
+  c_info "Limpiando caché completo de usuario (~/.cache)..."
+  local cache="${XDG_CACHE_HOME:-$HOME/.cache}"
+  if [ -d "$cache" ]; then
+    local before
+    before=$(path_size "$cache")
+    # Borra todo ~/.cache excepto el propio script de limpieza
+    run "find '$cache' -mindepth 1 -maxdepth 1 -exec rm -rf {} + 2>/dev/null"
+    local after
+    after=$(path_size "$cache")
+    c_info "  Antes: ${before:-?}  Después: ${after:-?}"
+  fi
+
+  # NVIDIA shader cache
+  if [ -d "$HOME/.nv" ]; then
+    local nv_size
+    nv_size=$(path_size "$HOME/.nv")
+    c_info "Limpiando caché NVIDIA (~/.nv): ${nv_size:-?}"
+    run "rm -rf '$HOME/.nv/'* 2>/dev/null"
+  fi
+  c_ok "Caché de usuario limpiada."
+}
+
+clean_dev() {
+  c_info "Limpiando cachés de herramientas de desarrollo..."
+  local found=0
+
+  # Gradle
+  if [ -d "$HOME/.gradle/caches" ]; then
+    c_info "  Gradle"
+    run "rm -rf '$HOME/.gradle/caches/'* 2>/dev/null"
+    found=1
+  fi
+  # npm
+  if [ -d "$HOME/.npm/_cacache" ]; then
+    c_info "  npm"
+    run "rm -rf '$HOME/.npm/_cacache/'* 2>/dev/null"
+    found=1
+  fi
+  # Cargo (Rust)
+  if [ -d "$HOME/.cargo/registry/cache" ]; then
+    c_info "  Cargo"
+    run "rm -rf '$HOME/.cargo/registry/cache/'* 2>/dev/null"
+    found=1
+  fi
+  # pip (Python)
+  local pip_cache="${XDG_CACHE_HOME:-$HOME/.cache}/pip"
+  if [ -d "$pip_cache" ]; then
+    c_info "  pip"
+    run "rm -rf '$pip_cache/'* 2>/dev/null"
+    found=1
+  fi
+  # Yarn
+  if [ -d "$HOME/.yarn/cache" ]; then
+    c_info "  Yarn"
+    run "rm -rf '$HOME/.yarn/cache/'* 2>/dev/null"
+    found=1
+  fi
+  # Maven (~/.m2/repository)
+  if [ -d "$HOME/.m2/repository" ]; then
+    c_info "  Maven (se omite ~/.m2/repository completo, solo descargas parciales)"
+    run "find '$HOME/.m2/repository' -type f -name '*.jar' -size 0 -delete 2>/dev/null"
+    run "find '$HOME/.m2/repository' -type f -name '*.lastUpdated' -delete 2>/dev/null"
+    found=1
+  fi
+  # Go module cache
+  if [ -d "$HOME/go/pkg/mod/cache" ]; then
+    c_info "  Go modules"
+    run "rm -rf '$HOME/go/pkg/mod/cache/'* 2>/dev/null"
+    found=1
+  fi
+
+  if [ "$found" -eq 0 ]; then
+    c_info "  No se detectaron herramientas de desarrollo con caché."
+  fi
+  c_ok "Cachés de desarrollo limpiadas."
+}
+
+clean_junk() {
+  c_info "Buscando y limpiando archivos basura seguros..."
+  local search_dirs=(
+    /tmp /var/tmp "$HOME/Downloads" "$HOME/Desktop" "$HOME/Documentos" "$HOME/Documents" "$HOME/Escritorio"
+  )
+  local total=0
+
+  # Patrones seguros de borrar
+  local patterns=(-name "*.swp" -o -name "*.swo" -o -name "*.bak" -o -name "*.old" -o -name "*.part" -o -name "*.crdownload" -o -name "*.tmp" -o -name "*.temp")
+
+  for dir in "${search_dirs[@]}"; do
+    [ -d "$dir" ] || continue
+    local count
+    count=$(find "$dir" -maxdepth 3 -type f \( "${patterns[@]}" \) 2>/dev/null | wc -l)
+    if [ "$count" -gt 0 ]; then
+      c_info "  $dir: ${count} archivo(s)"
+      run "find '$dir' -maxdepth 3 -type f \( ${patterns[*]} \) -delete 2>/dev/null"
+      total=$((total + count))
+    fi
+  done
+
+  # Archivos vacíos (0 KB) en /tmp, /var/tmp, ~/Downloads
+  for dir in /tmp /var/tmp "$HOME/Downloads"; do
+    [ -d "$dir" ] || continue
+    local empty
+    empty=$(find "$dir" -maxdepth 3 -type f -size 0 2>/dev/null | wc -l)
+    if [ "$empty" -gt 0 ]; then
+      c_info "  $dir: ${empty} archivo(s) vacío(s)"
+      run "find '$dir' -maxdepth 3 -type f -size 0 -delete 2>/dev/null"
+      total=$((total + empty))
+    fi
+  done
+
+  # __pycache__ en home (bytecode de Python, se regenera solo)
+  if [ -d "$HOME" ]; then
+    local pycache
+    pycache=$(find "$HOME" -maxdepth 6 -path '*/__pycache__' -type d 2>/dev/null | wc -l)
+    if [ "$pycache" -gt 0 ]; then
+      c_info "  __pycache__/: ${pycache} directorio(s) en ~/"
+      run "find '$HOME' -maxdepth 6 -path '*/__pycache__' -type d -exec rm -rf {} + 2>/dev/null"
+    fi
+  fi
+
+  if [ "$total" -eq 0 ] && [ "${pycache:-0}" -eq 0 ]; then
+    c_info "  No se encontró basura."
+  else
+    c_info "  Total eliminado: ${total} archivos basura + ${pycache:-0} __pycache__"
+  fi
+  c_ok "Basura limpiada."
+}
+
+clean_status() {
+  c_info "Uso de disco antes/después:"
+  printf '\n'
+  printf '  %-30s %12s  →  %-12s\n' "RUTA" "ANTES" "AHORA"
+  printf '  %-30s %12s  →  %-12s\n' "---" "-----" "----"
+
+  local paths=(/tmp /var/tmp /var/cache ~/.cache ~/.local/share/Trash ~/.nv /var/log)
+  for p in "${paths[@]}"; do
+    if [ -d "$p" ]; then
+      local sz
+      sz=$(du -sh "$p" 2>/dev/null | cut -f1)
+      printf '  %-30s %12s  →  %-12s\n' "$p" "${sz:-?}" "—"
+    fi
+  done
+  printf '\n'
+  c_info "Ejecutá clean --all para liberar espacio."
 }
 
 # ------------------------------------------------------------------ main
 main() {
   [ $# -eq 0 ] && usage 1
 
-  local do_temp=0 do_cache=0 do_logs=0 do_trash=0 do_thumbs=0 do_drives=0 do_browsers=0 do_ram=0
+  local do_temp=0 do_cache=0 do_logs=0 do_trash=0 do_thumbs=0 do_drives=0 do_browsers=0 do_ram=0 do_user_cache=0 do_dev=0 do_junk=0 do_status=0
 
   while [ $# -gt 0 ]; do
     case "$1" in
-      -a|--all)     do_temp=1; do_cache=1; do_logs=1; do_trash=1; do_thumbs=1; do_drives=1; do_browsers=1; do_ram=1 ;;
+      -a|--all)     do_temp=1; do_cache=1; do_logs=1; do_trash=1; do_thumbs=1; do_drives=1; do_browsers=1; do_ram=1; do_user_cache=1; do_dev=1; do_junk=1 ;;
       -t|--temp)    do_temp=1 ;;
       -c|--cache)   do_cache=1 ;;
       -l|--logs)    do_logs=1 ;;
@@ -242,6 +479,10 @@ main() {
       -b|--browsers) do_browsers=1 ;;
       -r|--ram)     do_ram=1 ;;
       -d|--drives)  do_drives=1 ;;
+      -u|--user-cache) do_user_cache=1 ;;
+      -D|--dev)     do_dev=1 ;;
+      -j|--junk)    do_junk=1 ;;
+      -s|--status)  do_status=1 ;;
       -n|--dry-run) DRY_RUN=1 ;;
       -h|--help)    usage 0 ;;
       *) c_err "Opción desconocida: $1"; usage 1 ;;
@@ -249,7 +490,7 @@ main() {
     shift
   done
 
-  if [ $((do_temp+do_cache+do_logs+do_drives+do_ram)) -gt 0 ]; then
+  if [ $((do_temp+do_cache+do_logs+do_drives+do_ram+do_dev+do_junk)) -gt 0 ]; then
     need_root
   fi
   [ "$DRY_RUN" -eq 1 ] && c_warn "Modo simulación (dry-run): no se borrará nada."
@@ -265,12 +506,18 @@ main() {
   [ "$do_browsers" -eq 1 ] && clean_browsers
   [ "$do_ram" -eq 1 ] && clean_ram
   [ "$do_drives" -eq 1 ] && clean_drives
+  [ "$do_user_cache" -eq 1 ] && clean_user_cache
+  [ "$do_dev" -eq 1 ] && clean_dev
+  [ "$do_junk" -eq 1 ] && clean_junk
 
   after=$(df --output=used / 2>/dev/null | tail -1 || echo 0)
   if [ "$DRY_RUN" -eq 0 ] && [ "$before" -gt "$after" ] 2>/dev/null; then
     local freed=$(( (before - after) / 1024 ))
     c_ok "Espacio liberado en /: ${freed} MB aprox."
   fi
+
+  [ "$do_status" -eq 1 ] && clean_status
+
   c_ok "Limpieza finalizada."
 }
 
