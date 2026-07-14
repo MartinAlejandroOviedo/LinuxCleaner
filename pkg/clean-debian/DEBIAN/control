@@ -1,0 +1,14 @@
+Package: clean-debian
+Version: 1.0.0
+Section: admin
+Priority: optional
+Architecture: all
+Depends: coreutils, findutils, util-linux
+Recommends: apt
+Maintainer: Martin <martin@debian>
+Installed-Size: 32
+Description: Limpiador de archivos temporales y residuales para Debian
+ Proporciona el comando "clean" para eliminar de forma segura archivos
+ temporales, caches de APT y del sistema, logs, papelera, miniaturas,
+ cache de navegadores, cache del kernel en RAM y papeleras de unidades
+ montadas. Incluye modo de simulacion (--dry-run) y opciones selectivas.
