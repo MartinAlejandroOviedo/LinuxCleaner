@@ -22,13 +22,15 @@
 #   -M, --media     Limpia cachés multimedia (VLC, MPV, GStreamer, GIMP, etc.)
 #   -s, --status    Muestra el uso de disco antes y después de la limpieza
 #   -n, --dry-run   Muestra lo que se haría sin borrar nada
-#   -I, --interactive Pide confirmación antes de borrar
+#   -I, --interactive Pide confirmación antes de borrar (automático con --all)
+#   -y, --yes       Omite la confirmación interactiva (útil con --all)
 #   -h, --help      Muestra esta ayuda
 #
 set -uo pipefail
 
 DRY_RUN=0
 INTERACTIVE=0
+NO_CONFIRM=0
 HISTFILE="${XDG_CACHE_HOME:-$HOME/.cache}/clean-history.log"
 SUDO=""
 
@@ -80,6 +82,9 @@ log_history() {
 }
 
 confirm_action() {
+  if [ "$NO_CONFIRM" -eq 1 ]; then
+    return 0
+  fi
   if [ "$INTERACTIVE" -eq 0 ]; then
     return 0
   fi
@@ -137,7 +142,8 @@ Opciones:
   -M, --media     Limpia cachés multimedia (VLC, MPV, GStreamer, GIMP, etc.)
   -s, --status    Muestra el uso de disco antes y después de la limpieza
   -n, --dry-run   Muestra lo que se haría sin borrar nada
-  -I, --interactive Pide confirmación antes de borrar
+  -I, --interactive Pide confirmación antes de borrar (automático con --all)
+  -y, --yes       Omite la confirmación interactiva (útil con --all)
   -h, --help      Muestra esta ayuda
 EOF
   exit "${1:-0}"
@@ -715,11 +721,11 @@ clean_status() {
 main() {
   [ $# -eq 0 ] && usage 1
 
-  local do_temp=0 do_cache=0 do_logs=0 do_trash=0 do_thumbs=0 do_drives=0 do_browsers=0 do_ram=0 do_user_cache=0 do_dev=0 do_junk=0 do_wine=0 do_media=0 do_status=0
+  local do_temp=0 do_cache=0 do_logs=0 do_trash=0 do_thumbs=0 do_drives=0 do_browsers=0 do_ram=0 do_user_cache=0 do_dev=0 do_junk=0 do_wine=0 do_media=0 do_status=0 do_all=0
 
   while [ $# -gt 0 ]; do
     case "$1" in
-      -a|--all)     do_temp=1; do_cache=1; do_logs=1; do_trash=1; do_thumbs=1; do_drives=1; do_browsers=1; do_ram=1; do_user_cache=1; do_dev=1; do_junk=1; do_wine=1; do_media=1 ;;
+      -a|--all)     do_temp=1; do_cache=1; do_logs=1; do_trash=1; do_thumbs=1; do_drives=1; do_browsers=1; do_ram=1; do_user_cache=1; do_dev=1; do_junk=1; do_wine=1; do_media=1; do_all=1 ;;
       -t|--temp)    do_temp=1 ;;
       -c|--cache)   do_cache=1 ;;
       -l|--logs)    do_logs=1 ;;
@@ -736,11 +742,17 @@ main() {
       -s|--status)  do_status=1 ;;
       -n|--dry-run) DRY_RUN=1 ;;
       -I|--interactive) INTERACTIVE=1 ;;
+      -y|--yes)     NO_CONFIRM=1 ;;
       -h|--help)    usage 0 ;;
       *) c_err "Opción desconocida: $1"; usage 1 ;;
     esac
     shift
   done
+
+  # --all activa automáticamente el modo interactivo (salvo que se use -y)
+  if [ "$do_all" -eq 1 ] && [ "$NO_CONFIRM" -eq 0 ] && [ "$DRY_RUN" -eq 0 ]; then
+    INTERACTIVE=1
+  fi
 
   if [ $((do_temp+do_cache+do_logs+do_drives+do_ram+do_dev+do_junk+do_media)) -gt 0 ]; then
     need_root
