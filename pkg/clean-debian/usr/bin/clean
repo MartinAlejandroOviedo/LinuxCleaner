@@ -21,6 +21,7 @@
 #   -w, --wine      Limpia temporales y cachés de Wine (~/.wine)
 #   -M, --media     Limpia cachés multimedia (VLC, MPV, GStreamer, GIMP, etc.)
 #   -g, --games     Limpia cachés de launchers de juegos (Steam, Lutris, Heroic, etc.)
+#   -V, --venv      Limpia entornos virtuales Python huérfanos y pip cache vieja
 #   -s, --status    Muestra el uso de disco antes y después de la limpieza
 #   -n, --dry-run   Muestra lo que se haría sin borrar nada
 #   -I, --interactive TUI con progreso y confirmación antes de borrar
@@ -199,6 +200,7 @@ Opciones:
   -w, --wine      Limpia temporales y cachés de Wine (~/.wine)
   -M, --media     Limpia cachés multimedia (VLC, MPV, GStreamer, GIMP, etc.)
   -g, --games     Limpia cachés de launchers de juegos (Steam, Lutris, Heroic, etc.)
+  -V, --venv      Limpia entornos virtuales Python huérfanos y pip cache
   -s, --status    Muestra el uso de disco antes y después de la limpieza
   -n, --dry-run   Muestra lo que se haría sin borrar nada
   -I, --interactive TUI con progreso y confirmación antes de borrar
@@ -519,19 +521,39 @@ clean_dev() {
     run "rm -rf '$HOME/.npm/_cacache/'* 2>/dev/null"
     found=1
   fi
-  # Cargo (Rust)
+  # Cargo (Rust) - más profundo
   if [ -d "$HOME/.cargo/registry/cache" ]; then
-    c_info "  Cargo"
+    c_info "  Cargo (registry cache)"
     run "rm -rf '$HOME/.cargo/registry/cache/'* 2>/dev/null"
     found=1
   fi
-  # pip (Python)
+  if [ -d "$HOME/.cargo/registry/src" ]; then
+    c_info "  Cargo (registry src)"
+    run "rm -rf '$HOME/.cargo/registry/src/'* 2>/dev/null"
+    found=1
+  fi
+  # Cargo toolchain cache
+  if [ -d "$HOME/.rustup/toolchains" ]; then
+    c_info "  Rustup (toolchain downloads)"
+    run "find '$HOME/.rustup' -name '*.tmp' -o -name '*.partial' 2>/dev/null -delete"
+    found=1
+  fi
+  # pip (Python) - caché completa de descargas
   local pip_cache="${XDG_CACHE_HOME:-$HOME/.cache}/pip"
   if [ -d "$pip_cache" ]; then
-    c_info "  pip"
+    c_info "  pip (HTTP/wheels cache)"
     run "rm -rf '$pip_cache/'* 2>/dev/null"
     found=1
   fi
+  # pip cache purge (wheels y HTTP cache interna)
+  for pip_cmd in pip3 pip; do
+    if command -v "$pip_cmd" >/dev/null 2>&1 && [ "$DRY_RUN" -eq 0 ]; then
+      c_info "  ${pip_cmd} cache purge"
+      run "$pip_cmd cache purge 2>/dev/null"
+      found=1
+      break
+    fi
+  done
   # Yarn
   if [ -d "$HOME/.yarn/cache" ]; then
     c_info "  Yarn"
@@ -545,10 +567,21 @@ clean_dev() {
     run "find '$HOME/.m2/repository' -type f -name '*.lastUpdated' -delete 2>/dev/null"
     found=1
   fi
-  # Go module cache
+  # Go module cache - profundo
   if [ -d "$HOME/go/pkg/mod/cache" ]; then
-    c_info "  Go modules"
+    c_info "  Go modules (download cache)"
     run "rm -rf '$HOME/go/pkg/mod/cache/'* 2>/dev/null"
+    found=1
+  fi
+  # go clean nativo (si go está en PATH)
+  if command -v go >/dev/null 2>&1; then
+    if [ "$DRY_RUN" -eq 0 ]; then
+      c_info "  go clean -cache -modcache"
+      GOPATH="${GOPATH:-$HOME/go}" run "go clean -cache 2>/dev/null"
+      GOPATH="${GOPATH:-$HOME/go}" run "go clean -modcache 2>/dev/null"
+    else
+      printf '    \033[2m(dry-run)\033[0m %s\n' "go clean -cache && go clean -modcache"
+    fi
     found=1
   fi
   # node_modules/.cache (webpack, babel, etc.)
@@ -556,6 +589,27 @@ clean_dev() {
     c_info "  node_modules/.cache"
     run "find '$HOME' -maxdepth 5 -path '*/node_modules/.cache' -type d -exec rm -rf {} + 2>/dev/null"
     found=1
+  fi
+  # node_modules/ huérfanos (sin package.json en el proyecto padre)
+  if [ "$DRY_RUN" -eq 0 ]; then
+    local orphan_nm=0
+    mapfile -t nm_dirs < <(find "$HOME" -maxdepth 5 -type d -name 'node_modules' 2>/dev/null)
+    for nm in "${nm_dirs[@]}"; do
+      local parent
+      parent=$(dirname "$nm")
+      # Si no hay package.json en el padre, está huérfano
+      if [ ! -f "$parent/package.json" ]; then
+        orphan_nm=$((orphan_nm + 1))
+        local short
+        short=$(echo "$nm" | sed "s|$HOME|~|")
+        c_info "  HUÉRFANO: $short ($(path_size "$nm"))"
+        run "rm -rf '$nm' 2>/dev/null"
+      fi
+    done
+    if [ "$orphan_nm" -gt 0 ]; then
+      c_info "  $orphan_nm node_modules huérfano(s) eliminado(s)."
+      found=1
+    fi
   fi
 
   if [ "$found" -eq 0 ]; then
@@ -883,6 +937,84 @@ clean_junk() {
   c_ok "Basura limpiada."
 }
 
+clean_venv() {
+  c_section "ENTORNOS VIRTUALES PYTHON"
+
+  local found=0 orphan=0
+  local marker_files=("requirements.txt" "requirements.in" "pyproject.toml" "setup.py" "setup.cfg" "Pipfile" "Pipfile.lock" "poetry.lock")
+
+  c_info "Buscando entornos virtuales huérfanos..."
+
+  # Buscar venvs (directorios que contienen pyvenv.cfg) bajo $HOME
+  local venvs
+  mapfile -t venvs < <(find "$HOME" -maxdepth 5 -type f -name 'pyvenv.cfg' 2>/dev/null)
+
+  for cfg in "${venvs[@]}"; do
+    local venv_dir
+    venv_dir=$(dirname "$cfg")
+    local parent_dir
+    parent_dir=$(dirname "$venv_dir")
+
+    # Es solo un venv si tiene bin/python o bin/activate
+    [ -f "$venv_dir/bin/activate" ] || [ -f "$venv_dir/Scripts/activate" ] || continue
+    found=$((found + 1))
+
+    # Verificar si el proyecto padre es activo (tiene archivos de proyecto Python)
+    local is_active=0
+    for mf in "${marker_files[@]}"; do
+      # Buscar en el padre o un nivel arriba (monorepos)
+      if [ -f "$parent_dir/$mf" ] || [ -f "$venv_dir/../$mf" ]; then
+        is_active=1
+        break
+      fi
+    done
+
+    if [ "$is_active" -eq 1 ]; then
+      # Venv activo: solo limpiar cache interna, no borrar el venv
+      local cache_dirs=("$venv_dir/lib/python"*"/site-packages/pip/_vendor/cachecontrol" "$venv_dir/pip-wheel-metadata")
+      for cd in "${cache_dirs[@]}"; do
+        [ -d "$cd" ] && run "rm -rf '$cd/'* 2>/dev/null"
+      done
+    else
+      # Venv huérfano: borrar completo
+      orphan=$((orphan + 1))
+      local short
+      short=$(echo "$venv_dir" | sed "s|$HOME|~|")
+      c_info "  HUÉRFANO: $short ($(path_size "$venv_dir"))"
+      if [ "$DRY_RUN" -eq 0 ]; then
+        run "rm -rf '$venv_dir' 2>/dev/null"
+      fi
+    fi
+  done
+
+  # Limpiar ~/.virtualenvs y pipenv cache
+  for d in "$HOME/.virtualenvs" "$HOME/.local/share/virtualenvs"; do
+    if [ -d "$d" ]; then
+      c_info "  Virtualenvs: $d ($(path_size "$d"))"
+      run "find '$d' -type d -name '__pycache__' -exec rm -rf {} + 2>/dev/null"
+      run "find '$d' -type f -name '*.pyc' -delete 2>/dev/null"
+    fi
+  done
+
+  # pip cache vieja (ruedas, HTTP, etc.)
+  for pip_cmd in pip3 pip; do
+    if command -v "$pip_cmd" >/dev/null 2>&1 && [ "$DRY_RUN" -eq 0 ]; then
+      c_info "  ${pip_cmd} cache purge"
+      run "$pip_cmd cache purge 2>/dev/null"
+      break
+    fi
+  done
+
+  if [ "$found" -eq 0 ]; then
+    c_info "  No se detectaron entornos virtuales."
+  else
+    c_info "  $found venv(s) encontrados, $orphan huérfano(s) eliminado(s)."
+    [ "$found" -gt "$orphan" ] && c_info "  $(($found - $orphan)) venv(s) de proyectos activos preservados."
+  fi
+
+  c_ok "Entornos virtuales limpiados."
+}
+
 clean_status() {
   c_info "Uso de disco antes/después:"
   printf '\n'
@@ -910,11 +1042,11 @@ clean_status() {
 main() {
   [ $# -eq 0 ] && usage 1
 
-  local do_temp=0 do_cache=0 do_logs=0 do_trash=0 do_thumbs=0 do_drives=0 do_browsers=0 do_ram=0 do_user_cache=0 do_dev=0 do_junk=0 do_wine=0 do_media=0 do_games=0 do_status=0 do_all=0
+  local do_temp=0 do_cache=0 do_logs=0 do_trash=0 do_thumbs=0 do_drives=0 do_browsers=0 do_ram=0 do_user_cache=0 do_dev=0 do_junk=0 do_wine=0 do_media=0 do_games=0 do_venv=0 do_status=0 do_all=0
 
   while [ $# -gt 0 ]; do
     case "$1" in
-      -a|--all)     do_temp=1; do_cache=1; do_logs=1; do_trash=1; do_thumbs=1; do_drives=1; do_browsers=1; do_ram=1; do_user_cache=1; do_dev=1; do_junk=1; do_wine=1; do_media=1; do_games=1; do_all=1 ;;
+      -a|--all)     do_temp=1; do_cache=1; do_logs=1; do_trash=1; do_thumbs=1; do_drives=1; do_browsers=1; do_ram=1; do_user_cache=1; do_dev=1; do_junk=1; do_wine=1; do_media=1; do_games=1; do_venv=1; do_all=1 ;;
       -t|--temp)    do_temp=1 ;;
       -c|--cache)   do_cache=1 ;;
       -l|--logs)    do_logs=1 ;;
@@ -929,6 +1061,7 @@ main() {
       -w|--wine)    do_wine=1 ;;
       -M|--media)   do_media=1 ;;
       -g|--games)   do_games=1 ;;
+      -V|--venv)    do_venv=1 ;;
       -s|--status)  do_status=1 ;;
       -n|--dry-run) DRY_RUN=1 ;;
       -I|--interactive) INTERACTIVE=1 ;;
@@ -1226,6 +1359,7 @@ main() {
   [ "$do_wine" -eq 1 ] && tui_run_task "Wine" "Limpiando temporales de Wine y prefixes" clean_wine
   [ "$do_media" -eq 1 ] && tui_run_task "Media" "Limpiando multimedia, edición y fotografía" clean_media
   [ "$do_games" -eq 1 ] && tui_run_task "Games" "Limpiando cachés de juegos y launchers" clean_games
+  [ "$do_venv" -eq 1 ] && tui_run_task "PythonVenv" "Limpiando entornos virtuales Python huérfanos" clean_venv
 
   after=$(df --output=used / 2>/dev/null | tail -1 || echo 0)
   if [ "$DRY_RUN" -eq 0 ] && [ "$before" -gt "$after" ] 2>/dev/null; then

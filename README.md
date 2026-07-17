@@ -6,7 +6,7 @@
 ![Static Badge](https://img.shields.io/badge/fedora-supported-blue?logo=fedora)
 ![Static Badge](https://img.shields.io/badge/arch-supported-blue?logo=archlinux)
 ![Static Badge](https://img.shields.io/badge/license-MIT-green)
-![Static Badge](https://img.shields.io/badge/version-1.3.1-white)
+![Static Badge](https://img.shields.io/badge/version-1.5.0-white)
 
 ```bash
 $ clean --all
@@ -61,7 +61,7 @@ $ clean --all
 ### Desde .deb (Debian/Ubuntu)
 
 ```bash
-sudo apt install ./releases/clean-debian_1.3.1_all.deb
+sudo apt install ./releases/clean-debian_1.5.0_all.deb
 ```
 
 ### Manual (cualquier distro)
@@ -101,6 +101,7 @@ clean --help                 # ayuda completa
 | `-w` | `--wine` | Temporales de Wine + Lutris + PlayOnLinux + Bottles |
 | `-M` | `--media` | VLC, MPV, OBS, Kdenlive, Shotcut, GIMP, Krita, Darktable, Audacity, Ardour |
 | `-g` | `--games` | Steam, Lutris, Heroic, Legendary, itch, Bottles, RetroArch, PrismLauncher, Minecraft |
+| `-V` | `--venv` | Entornos virtuales Python huérfanos + `pip cache purge` + `node_modules/` sin proyecto |
 | `-s` | `--status` | Reporte `du -sh` de rutas clave |
 | `-n` | `--dry-run` | Modo simulación (no borra nada) |
 | `-I` | `--interactive` | TUI con progreso y confirmación (implícito con `--all`) |
@@ -198,6 +199,14 @@ Busca en `/tmp`, `/var/tmp`, `~/Downloads`, `~/Desktop`, `~/Documentos` y `~/Esc
 - **Emulación y juegos:** RetroArch, PrismLauncher, logs y crash-reports de Minecraft.
 - No borra juegos instalados, partidas guardadas, prefixes de Wine/Proton ni descargas parciales.
 
+### `--venv`
+- Detecta entornos virtuales Python buscando `pyvenv.cfg` + `bin/activate` en todo `$HOME`.
+- Si el proyecto padre tiene `requirements.txt`, `pyproject.toml`, `setup.py`, `setup.cfg`, `Pipfile`, `Pipfile.lock` o `poetry.lock` → **activo** (solo se limpia cache interna de pip, no se borra el venv).
+- Si el proyecto padre **no** tiene esos archivos → **huérfano** (se borra completo).
+- Incluye `pip cache purge` para eliminar ruedas descargadas y HTTP cache.
+- También detecta `node_modules/` sin `package.json` en el padre (huérfano de npm).
+- Ejemplo: 37 venvs encontrados → 11 huérfanos (1.5 GB) eliminados, 26 de proyectos activos preservados.
+
 ## 📋 Requisitos
 
 - Linux con bash 4+
@@ -209,7 +218,7 @@ Busca en `/tmp`, `/var/tmp`, `~/Downloads`, `~/Desktop`, `~/Documentos` y `~/Esc
 ```bash
 cd pkg
 mkdir -p ../releases
-fakeroot dpkg-deb --build clean-debian ../releases/clean-debian_1.3.1_all.deb
+fakeroot dpkg-deb --build clean-debian ../releases/clean-debian_1.5.0_all.deb
 ```
 
 ## 📄 Licencia

@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.5.0 - 2026-07-16
+
+- Nuevo: modulo `--venv` / `-V` para limpieza de entornos virtuales Python.
+- Detecta venvs huerfanos (sin `requirements.txt`, `pyproject.toml`, `setup.py`, etc. en el proyecto padre).
+- Preserva automaticamente los venvs de proyectos activos (solo limpia cache interna).
+- Incluye `pip cache purge` para eliminar ruedas y HTTP cache vieja.
+- Nuevo en `--dev`: deteccion de `node_modules/` huerfanos (sin `package.json` en el padre).
+- Limpieza profunda de `node_modules/` abandonados que ocupan espacio innecesario.
+- Limpieza profunda de Go: `go clean -cache` y `go clean -modcache`.
+- Limpieza profunda de Rust: `registry/src/` + archivos parciales de rustup.
+
+## 1.4.0 - 2026-07-16
+
+- Limpieza profunda de Python: `pip cache purge` (wheels, HTTP cache, ruedas descargadas).
+- Limpieza profunda de Rust: `registry/src/` (fuentes de crates) + archivos parciales de rustup.
+- Limpieza profunda de Go: `go clean -cache` y `go clean -modcache` nativos.
+- Documentacion: actualiza README.md con referencia a assets/screenshot.png y versiones.
+
 ## 1.3.1 - 2026-07-17
 
 - Agrega entrada de menú con `clean-debian.desktop` para que Linux Cleaner aparezca en el lanzador de aplicaciones.
