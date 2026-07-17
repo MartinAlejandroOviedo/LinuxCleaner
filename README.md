@@ -6,7 +6,7 @@
 ![Static Badge](https://img.shields.io/badge/fedora-supported-blue?logo=fedora)
 ![Static Badge](https://img.shields.io/badge/arch-supported-blue?logo=archlinux)
 ![Static Badge](https://img.shields.io/badge/license-MIT-green)
-![Static Badge](https://img.shields.io/badge/version-1.5.0-white)
+![Static Badge](https://img.shields.io/badge/version-1.5.1-white)
 
 ```bash
 $ clean --all
@@ -61,7 +61,7 @@ $ clean --all
 ### Desde .deb (Debian/Ubuntu)
 
 ```bash
-sudo apt install ./releases/clean-debian_1.5.0_all.deb
+sudo apt install ./releases/clean-debian_1.5.1_all.deb
 ```
 
 ### Manual (cualquier distro)
@@ -218,7 +218,7 @@ Busca en `/tmp`, `/var/tmp`, `~/Downloads`, `~/Desktop`, `~/Documentos` y `~/Esc
 ```bash
 cd pkg
 mkdir -p ../releases
-fakeroot dpkg-deb --build clean-debian ../releases/clean-debian_1.5.0_all.deb
+fakeroot dpkg-deb --build clean-debian ../releases/clean-debian_1.5.1_all.deb
 ```
 
 ## 📄 Licencia

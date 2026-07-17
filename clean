@@ -22,6 +22,7 @@
 #   -M, --media     Limpia cachés multimedia (VLC, MPV, GStreamer, GIMP, etc.)
 #   -g, --games     Limpia cachés de launchers de juegos (Steam, Lutris, Heroic, etc.)
 #   -V, --venv      Limpia entornos virtuales Python huérfanos y pip cache vieja
+#   -K, --apt-check Revisa fuentes APT con errores, duplicados y claves faltantes
 #   -s, --status    Muestra el uso de disco antes y después de la limpieza
 #   -n, --dry-run   Muestra lo que se haría sin borrar nada
 #   -I, --interactive TUI con progreso y confirmación antes de borrar
@@ -201,6 +202,7 @@ Opciones:
   -M, --media     Limpia cachés multimedia (VLC, MPV, GStreamer, GIMP, etc.)
   -g, --games     Limpia cachés de launchers de juegos (Steam, Lutris, Heroic, etc.)
   -V, --venv      Limpia entornos virtuales Python huérfanos y pip cache
+  -K, --apt-check Revisa fuentes APT con errores, duplicados y claves faltantes
   -s, --status    Muestra el uso de disco antes y después de la limpieza
   -n, --dry-run   Muestra lo que se haría sin borrar nada
   -I, --interactive TUI con progreso y confirmación antes de borrar
@@ -278,6 +280,68 @@ clean_cache() {
   [ -d /var/cache/thumbnails ] && run "$SUDO rm -rf /var/cache/thumbnails/* 2>/dev/null"
 
   c_ok "Caché de paquetes limpiada."
+}
+
+clean_apt_check() {
+  c_section "REVISIÓN DE FUENTES APT"
+
+  if ! command -v apt-get >/dev/null 2>&1; then
+    c_warn "APT no disponible, se omite revisión."
+    return
+  fi
+
+  local issues=0
+
+  # Ejecutar apt-get update UNA SOLA VEZ y capturar todo
+  c_info "Ejecutando apt-get update para diagnóstico..."
+  local apt_output
+  apt_output=$(apt-get update 2>&1) || true
+
+  # 1. Buscar duplicados
+  local dupes
+  dupes=$(echo "$apt_output" | grep -oP "El objetivo .* está configurado varias veces" | sed 's/El objetivo /  /' | sort -u || true)
+  if [ -n "$dupes" ]; then
+    c_warn "Repositorios configurados múltiples veces:"
+    echo "$dupes"
+    c_info "  Solución: revisá /etc/apt/sources.list y /etc/apt/sources.list.d/"
+    c_info "  y eliminá las líneas duplicadas. Luego: sudo apt update"
+    issues=$((issues + 1))
+  fi
+
+  # 2. Claves GPG faltantes
+  local key_errors
+  key_errors=$(echo "$apt_output" | grep -iE "NO_PUBKEY|GPG error|public key is not available" | sed 's/^/  /' || true)
+  if [ -n "$key_errors" ]; then
+    c_warn "Errores de claves GPG:"
+    echo "$key_errors"
+    c_info "  Solución: sudo apt-key adv --keyserver keyserver.ubuntu.com --recv-keys <ID>"
+    issues=$((issues + 1))
+  fi
+
+  # 3. Repos caídos o inaccesibles
+  local dead_repos
+  dead_repos=$(echo "$apt_output" | grep -iE "404  Not Found|No se pudo resolver|Could not resolve|Connection failed|Temporary failure" | sed 's/^/  /' || true)
+  if [ -n "$dead_repos" ]; then
+    c_warn "Repositorios inaccesibles o caídos:"
+    echo "$dead_repos"
+    issues=$((issues + 1))
+  fi
+
+  # 4. Archivos .list y .sources mezclados (puede causar conflictos)
+  local has_list=0 has_sources=0
+  [ -n "$(ls /etc/apt/sources.list.d/*.list 2>/dev/null)" ] && has_list=1
+  [ -n "$(ls /etc/apt/sources.list.d/*.sources 2>/dev/null)" ] && has_sources=1
+  if [ "$has_list" -eq 1 ] && [ "$has_sources" -eq 1 ]; then
+    c_info "  Conviven .list y .sources en sources.list.d/ (puede generar duplicados)."
+    c_info "  Revisá si algún repositorio está definido en ambos formatos."
+  fi
+
+  if [ "$issues" -eq 0 ]; then
+    c_ok "No se detectaron problemas en las fuentes de APT."
+  else
+    c_warn "Se detectaron $issues tipo(s) de problema(s) en las fuentes APT."
+  fi
+  c_ok "Revisión de fuentes APT completada."
 }
 
 clean_logs() {
@@ -1042,7 +1106,7 @@ clean_status() {
 main() {
   [ $# -eq 0 ] && usage 1
 
-  local do_temp=0 do_cache=0 do_logs=0 do_trash=0 do_thumbs=0 do_drives=0 do_browsers=0 do_ram=0 do_user_cache=0 do_dev=0 do_junk=0 do_wine=0 do_media=0 do_games=0 do_venv=0 do_status=0 do_all=0
+  local do_temp=0 do_cache=0 do_logs=0 do_trash=0 do_thumbs=0 do_drives=0 do_browsers=0 do_ram=0 do_user_cache=0 do_dev=0 do_junk=0 do_wine=0 do_media=0 do_games=0 do_venv=0 do_apt_check=0 do_status=0 do_all=0
 
   while [ $# -gt 0 ]; do
     case "$1" in
@@ -1062,6 +1126,7 @@ main() {
       -M|--media)   do_media=1 ;;
       -g|--games)   do_games=1 ;;
       -V|--venv)    do_venv=1 ;;
+      -K|--apt-check) do_apt_check=1 ;;
       -s|--status)  do_status=1 ;;
       -n|--dry-run) DRY_RUN=1 ;;
       -I|--interactive) INTERACTIVE=1 ;;
@@ -1360,6 +1425,7 @@ main() {
   [ "$do_media" -eq 1 ] && tui_run_task "Media" "Limpiando multimedia, edición y fotografía" clean_media
   [ "$do_games" -eq 1 ] && tui_run_task "Games" "Limpiando cachés de juegos y launchers" clean_games
   [ "$do_venv" -eq 1 ] && tui_run_task "PythonVenv" "Limpiando entornos virtuales Python huérfanos" clean_venv
+  [ "$do_apt_check" -eq 1 ] && tui_run_task "AptCheck" "Revisando fuentes APT con errores" clean_apt_check
 
   after=$(df --output=used / 2>/dev/null | tail -1 || echo 0)
   if [ "$DRY_RUN" -eq 0 ] && [ "$before" -gt "$after" ] 2>/dev/null; then

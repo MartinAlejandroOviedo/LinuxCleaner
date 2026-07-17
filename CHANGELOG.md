@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.5.1 - 2026-07-16
+
+- Nuevo: `--apt-check` / `-K` para diagnosticar fuentes APT (duplicados, claves GPG, repos caídos).
+- Ejecuta una sola pasada de `apt-get update` para todo el diagnóstico.
+- Detecta convivencia de `.list` y `.sources` en `sources.list.d/`.
+
 ## 1.5.0 - 2026-07-16
 
 - Nuevo: modulo `--venv` / `-V` para limpieza de entornos virtuales Python.
