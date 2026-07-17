@@ -1,12 +1,12 @@
 # 🧹 Linux Cleaner
 
-**`clean`** es un comando para Linux (Debian/Ubuntu, Fedora, Arch, Gentoo) que limpia archivos temporales, cachés, logs, papeleras y configuraciones residuales del sistema. Con escaneo interactivo, spinner animado y 15 módulos de limpieza.
+**`clean`** es un comando para Linux (Debian/Ubuntu, Fedora, Arch, Gentoo) que limpia archivos temporales, cachés, logs, papeleras y configuraciones residuales del sistema. Con TUI interactiva 2026, barras de progreso de escaneo/borrado y 16 módulos de limpieza.
 
 ![Static Badge](https://img.shields.io/badge/debian-%3E%3D%2012-blue?logo=debian)
 ![Static Badge](https://img.shields.io/badge/fedora-supported-blue?logo=fedora)
 ![Static Badge](https://img.shields.io/badge/arch-supported-blue?logo=archlinux)
 ![Static Badge](https://img.shields.io/badge/license-MIT-green)
-![Static Badge](https://img.shields.io/badge/version-1.2.0-white)
+![Static Badge](https://img.shields.io/badge/version-1.3.1-white)
 
 ```bash
 $ clean --all
@@ -43,6 +43,10 @@ $ clean --all
   basura en /tmp, /var/tmp, ~/Downloads           8  archivos
   __pycache__ en ~/                             186  directorios
 
+  [ GAMES ] Launchers y juegos
+  ~/.steam/steam/steamapps/shadercache          1,2G
+  ~/.cache/lutris                                81M
+
   --------------------------------------------
   Total aproximado encontrado: 550 MB
   --------------------------------------------
@@ -57,7 +61,7 @@ $ clean --all
 ### Desde .deb (Debian/Ubuntu)
 
 ```bash
-sudo apt install ./pkg/clean-debian_1.2.0_all.deb
+sudo apt install ./releases/clean-debian_1.3.1_all.deb
 ```
 
 ### Manual (cualquier distro)
@@ -70,7 +74,7 @@ sudo chmod +x /usr/local/bin/clean
 ## 🚀 Uso
 
 ```bash
-clean --all                  # escanea + pide confirmación + limpia
+clean --all                  # TUI: escanea + muestra progreso + pide confirmación + limpia
 clean --all --yes            # limpia todo sin preguntar (cron/scripts)
 clean --all --dry-run        # simulación: muestra qué haría sin borrar
 clean --browsers --dev       # solo tareas específicas
@@ -95,16 +99,18 @@ clean --help                 # ayuda completa
 | `-D` | `--dev` | Gradle, npm, Cargo, pip, Yarn, Maven, Go, `node_modules/.cache` |
 | `-j` | `--junk` | `*.swp`, `*.bak`, `*.part`, `*.lock`, archivos vacíos, `__pycache__` |
 | `-w` | `--wine` | Temporales de Wine + Lutris + PlayOnLinux + Bottles |
-| `-M` | `--media` | VLC, MPV, GStreamer, GIMP, Krita, PulseAudio, PipeWire |
+| `-M` | `--media` | VLC, MPV, OBS, Kdenlive, Shotcut, GIMP, Krita, Darktable, Audacity, Ardour |
+| `-g` | `--games` | Steam, Lutris, Heroic, Legendary, itch, Bottles, RetroArch, PrismLauncher, Minecraft |
 | `-s` | `--status` | Reporte `du -sh` de rutas clave |
 | `-n` | `--dry-run` | Modo simulación (no borra nada) |
-| `-I` | `--interactive` | Pide confirmación (implícito con `--all`) |
+| `-I` | `--interactive` | TUI con progreso y confirmación (implícito con `--all`) |
 | `-y` | `--yes` | Omite la confirmación (útil con `--all` en scripts) |
 | `-h` | `--help` | Ayuda |
 
 ## 🛡️ Seguridad
 
 - **Escaneo previo**: `--all` muestra qué encontró **antes** de borrar y pide confirmación.
+- **TUI con progreso**: muestra fase, porcentaje y detalle durante búsqueda y borrado.
 - **Modo simulación**: `--dry-run` imprime los comandos exactos que se ejecutarían.
 - **Sin sudo innecesario**: tareas de usuario (papelera, miniaturas, navegadores) no piden privilegios.
 - **Servicios en ejecución**: PulseAudio y PipeWire se omiten si están corriendo para no cortar el audio.
@@ -179,10 +185,18 @@ Busca en `/tmp`, `/var/tmp`, `~/Downloads`, `~/Desktop`, `~/Documentos` y `~/Esc
 
 ### `--media`
 - **Audio:** PulseAudio, PipeWire (solo si no están corriendo)
-- **Video:** VLC, MPV, GStreamer, FFmpeg, OBS
-- **Imágenes:** GIMP, Krita, Inkscape, Darktable, RawTherapee, EOG
-- **Música:** Rhythmbox, Audacious, Clementine, DeaDBeeF
+- **Video y streaming:** VLC, MPV, GStreamer, FFmpeg, OBS.
+- **Edición de video:** Kdenlive, Shotcut, OpenShot, Pitivi, HandBrake, DaVinci Resolve, Blender.
+- **Fotografía e imagen:** GIMP, Krita, Inkscape, Darktable, RawTherapee, digiKam, Shotwell, gThumb, Nomacs, Pinta, MyPaint.
+- **Audio y música:** Rhythmbox, Audacious, Clementine, DeaDBeeF, Audacity, Ardour, LMMS, Mixxx.
+- **Residuos seguros:** cachés, thumbnails, proxies, logs, crash-reports y temporales regenerables.
 - **Display Managers:** LightDM, SDDM, GDM (solo sin sesión gráfica activa)
+
+### `--games`
+- **Steam:** `appcache/httpcache`, `config/htmlcache`, `logs`, `steamapps/shadercache`, `steamapps/temp`.
+- **Launchers:** Lutris, Heroic Games Launcher, Legendary/Epic, itch, Bottles, Minigalaxy.
+- **Emulación y juegos:** RetroArch, PrismLauncher, logs y crash-reports de Minecraft.
+- No borra juegos instalados, partidas guardadas, prefixes de Wine/Proton ni descargas parciales.
 
 ## 📋 Requisitos
 
@@ -194,7 +208,8 @@ Busca en `/tmp`, `/var/tmp`, `~/Downloads`, `~/Desktop`, `~/Documentos` y `~/Esc
 
 ```bash
 cd pkg
-fakeroot dpkg-deb --build clean-debian clean-debian_1.2.0_all.deb
+mkdir -p ../releases
+fakeroot dpkg-deb --build clean-debian ../releases/clean-debian_1.3.1_all.deb
 ```
 
 ## 📄 Licencia

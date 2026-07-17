@@ -20,9 +20,10 @@
 #   -j, --junk      Busca y borra archivos basura seguros (*.swp, *.pyc, .DS_Store, etc.)
 #   -w, --wine      Limpia temporales y cachés de Wine (~/.wine)
 #   -M, --media     Limpia cachés multimedia (VLC, MPV, GStreamer, GIMP, etc.)
+#   -g, --games     Limpia cachés de launchers de juegos (Steam, Lutris, Heroic, etc.)
 #   -s, --status    Muestra el uso de disco antes y después de la limpieza
 #   -n, --dry-run   Muestra lo que se haría sin borrar nada
-#   -I, --interactive Pide confirmación antes de borrar (automático con --all)
+#   -I, --interactive TUI con progreso y confirmación antes de borrar
 #   -y, --yes       Omite la confirmación interactiva (útil con --all)
 #   -h, --help      Muestra esta ayuda
 #
@@ -33,12 +34,66 @@ INTERACTIVE=0
 NO_CONFIRM=0
 HISTFILE="${XDG_CACHE_HOME:-$HOME/.cache}/clean-history.log"
 SUDO=""
+TUI_TASK_CURRENT=0
+TUI_TASK_TOTAL=0
 
 # ------------------------------------------------------------------ helpers
 c_info()  { printf '\033[1;34m[*]\033[0m %s\n' "$1"; }
 c_ok()    { printf '\033[1;32m[+]\033[0m %s\n' "$1"; }
 c_warn()  { printf '\033[1;33m[!]\033[0m %s\n' "$1"; }
 c_err()   { printf '\033[1;31m[x]\033[0m %s\n' "$1" >&2; }
+
+term_width() {
+  local cols
+  cols=$(tput cols 2>/dev/null || printf '80')
+  [ "$cols" -lt 60 ] && cols=60
+  printf '%s\n' "$cols"
+}
+
+tui_line() {
+  local cols
+  cols=$(term_width)
+  printf '  \033[38;5;45m'
+  printf '%*s' "$((cols - 4))" '' | tr ' ' '='
+  printf '\033[0m\n'
+}
+
+tui_header() {
+  local title="$1"
+  printf '\n'
+  tui_line
+  printf '  \033[1;38;5;45m%s\033[0m\n' "$title"
+  tui_line
+}
+
+tui_progress() {
+  local phase="$1" current="$2" total="$3" detail="$4"
+  [ "$total" -gt 0 ] || total=1
+  [ "$current" -gt "$total" ] && current="$total"
+
+  local width=28
+  local percent=$(( current * 100 / total ))
+  local filled=$(( current * width / total ))
+  local empty=$(( width - filled ))
+  local bar_done bar_empty
+  bar_done=$(printf '%*s' "$filled" '' | tr ' ' '#')
+  bar_empty=$(printf '%*s' "$empty" '' | tr ' ' '.')
+
+  printf '  \033[1;36m%-8s\033[0m [%s%s] \033[1;37m%3d%%\033[0m  %s\n' "$phase" "$bar_done" "$bar_empty" "$percent" "$detail"
+}
+
+tui_scan_step() {
+  local current="$1" total="$2" detail="$3"
+  tui_progress "Escaneo" "$current" "$total" "$detail"
+}
+
+tui_run_task() {
+  local label="$1" detail="$2" fn="$3"
+  TUI_TASK_CURRENT=$((TUI_TASK_CURRENT + 1))
+  tui_progress "Borrado" "$TUI_TASK_CURRENT" "$TUI_TASK_TOTAL" "$detail"
+  "$fn"
+  c_ok "Módulo completado: $label"
+}
 
 # Cabecera con barra azul para secciones
 c_section() {
@@ -78,7 +133,9 @@ run_spin() {
 }
 
 log_history() {
-  printf '[%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$1" >> "$HISTFILE"
+  local histdir="${HISTFILE%/*}"
+  mkdir -p "$histdir" 2>/dev/null || return 0
+  { printf '[%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$1" >> "$HISTFILE"; } 2>/dev/null || true
 }
 
 confirm_action() {
@@ -113,6 +170,7 @@ run() {
   if [ "$DRY_RUN" -eq 1 ]; then
     printf '    \033[2m(dry-run)\033[0m %s\n' "$*"
   else
+    printf '    \033[38;5;45m→\033[0m %s\n' "$*"
     eval "$@"
   fi
 }
@@ -140,9 +198,10 @@ Opciones:
   -j, --junk      Busca y borra archivos basura seguros (*.swp, *.pyc, .DS_Store, etc.)
   -w, --wine      Limpia temporales y cachés de Wine (~/.wine)
   -M, --media     Limpia cachés multimedia (VLC, MPV, GStreamer, GIMP, etc.)
+  -g, --games     Limpia cachés de launchers de juegos (Steam, Lutris, Heroic, etc.)
   -s, --status    Muestra el uso de disco antes y después de la limpieza
   -n, --dry-run   Muestra lo que se haría sin borrar nada
-  -I, --interactive Pide confirmación antes de borrar (automático con --all)
+  -I, --interactive TUI con progreso y confirmación antes de borrar
   -y, --yes       Omite la confirmación interactiva (útil con --all)
   -h, --help      Muestra esta ayuda
 EOF
@@ -152,6 +211,10 @@ EOF
 # Tamaño legible de una ruta (0 si no existe)
 path_size() {
   du -sh "$1" 2>/dev/null | awk '{print $1; exit}'
+}
+
+path_key() {
+  readlink -f "$1" 2>/dev/null || printf '%s\n' "$1"
 }
 
 # ------------------------------------------------------------------ tareas
@@ -549,7 +612,21 @@ clean_media() {
 
   local found=0
   local cache="${XDG_CACHE_HOME:-$HOME/.cache}"
+  local cfg="${XDG_CONFIG_HOME:-$HOME/.config}"
   local data="${XDG_DATA_HOME:-$HOME/.local/share}"
+  local seen_paths="|"
+
+  clean_media_dir() {
+    local d="$1"
+    [ -d "$d" ] || return 0
+    local key
+    key=$(path_key "$d")
+    case "$seen_paths" in *"|$key|"*) return 0 ;; esac
+    seen_paths="${seen_paths}${key}|"
+    found=$((found + 1))
+    c_info "  $(echo "$d" | sed "s|$HOME|~|")"
+    run "rm -rf '$d/'* 2>/dev/null"
+  }
 
   # ── Audio ──
   # PulseAudio (solo si no está corriendo)
@@ -557,9 +634,7 @@ clean_media() {
     c_warn "  PulseAudio está corriendo; se omiten sus cachés para no interrumpir el audio."
   else
     if [ -d "$cache/pulse" ]; then
-      c_info "  PulseAudio"
-      run "rm -rf '$cache/pulse/'* 2>/dev/null"
-      found=1
+      clean_media_dir "$cache/pulse"
     fi
   fi
   # PipeWire (solo si no está corriendo)
@@ -567,32 +642,36 @@ clean_media() {
     c_warn "  PipeWire está corriendo; se omiten sus cachés."
   else
     if [ -d "$cache/pipewire" ]; then
-      c_info "  PipeWire"
-      run "rm -rf '$cache/pipewire/'* 2>/dev/null"
-      found=1
+      clean_media_dir "$cache/pipewire"
     fi
   fi
 
-  # ── Video ──
+  # ── Video, streaming y edición ──
   local video_dirs=(
     "$cache/gstreamer-1.0"
     "$cache/vlc"
     "$cache/mpv"
     "$cache/ffmpeg"
     "$cache/obs-studio"
-    "$data/vlc"
+    "$cfg/obs-studio/logs"
+    "$cache/kdenlive"
+    "$data/kdenlive/proxy"
+    "$cache/shotcut"
+    "$cfg/Meltytech/Shotcut/cache"
+    "$cache/OpenShot"
+    "$cache/openshot-qt"
+    "$data/openshot_qt/thumbnail"
+    "$cache/pitivi"
+    "$cache/HandBrake"
+    "$cache/DaVinciResolve"
+    "$cache/BlackmagicDesign/DaVinci Resolve"
+    "$cache/blender"
   )
   for d in "${video_dirs[@]}"; do
-    if [ -d "$d" ]; then
-      found=1
-      local label
-      label=$(echo "$d" | sed "s|$HOME|~|")
-      c_info "  $label"
-      run "rm -rf '$d/'* 2>/dev/null"
-    fi
+    clean_media_dir "$d"
   done
 
-  # ── Imágenes ──
+  # ── Fotografía, dibujo y edición de imágenes ──
   local image_dirs=(
     "$cache/eog"
     "$cache/gimp"
@@ -600,33 +679,45 @@ clean_media() {
     "$cache/inkscape"
     "$cache/darktable"
     "$cache/rawtherapee"
-    "$data/gimp"
+    "$cache/digikam"
+    "$cache/shotwell"
+    "$cache/gthumb"
+    "$cache/nomacs"
+    "$cache/pinta"
+    "$cache/mypaint"
+    "$cache/rapid-photo-downloader"
+    "$cfg/GIMP/*/tmp"
+    "$cfg/GIMP/*/templaterc.d"
+    "$cfg/krita/cache"
+    "$cfg/darktable/cached_kernels_for_*"
+    "$cfg/RawTherapee*/cache"
+    "$data/Trash/files/gimp-temp-*"
   )
   for d in "${image_dirs[@]}"; do
-    if [ -d "$d" ]; then
-      found=1
-      local label
-      label=$(echo "$d" | sed "s|$HOME|~|")
-      c_info "  $label"
-      run "rm -rf '$d/'* 2>/dev/null"
-    fi
+    for expanded in $d; do
+      clean_media_dir "$expanded"
+    done
   done
 
-  # ── Reproductores de música ──
+  # ── Audio, música y DAWs ──
   local music_dirs=(
-    "$data/rhythmbox"
-    "$data/audacious"
-    "$data/clementine"
-    "$data/deadbeef"
+    "$cache/rhythmbox"
+    "$cache/audacious"
+    "$cache/clementine"
+    "$cache/deadbeef"
+    "$cache/strawberry"
+    "$cache/lollypop"
+    "$cache/quodlibet"
+    "$cache/audacity"
+    "$cfg/audacity/SessionData"
+    "$cache/ardour6"
+    "$cache/ardour7"
+    "$cache/ardour8"
+    "$cache/lmms"
+    "$cache/mixxx"
   )
   for d in "${music_dirs[@]}"; do
-    if [ -d "$d" ]; then
-      found=1
-      local label
-      label=$(echo "$d" | sed "s|$HOME|~|")
-      c_info "  $label"
-      run "rm -rf '$d/'* 2>/dev/null"
-    fi
+    clean_media_dir "$d"
   done
 
   # ── Display managers (solo si no hay sesión gráfica activa) ──
@@ -635,7 +726,7 @@ clean_media() {
       if [ -d "$dm" ]; then
         c_info "  $dm"
         run "$SUDO rm -rf '$dm/'* 2>/dev/null"
-        found=1
+        found=$((found + 1))
       fi
     done
   fi
@@ -643,9 +734,102 @@ clean_media() {
   if [ "$found" -eq 0 ]; then
     c_info "  No se detectaron cachés multimedia."
   else
-    c_info "  $found categoría(s) multimedia limpiada(s)."
+    c_info "  $found ruta(s) multimedia limpiada(s)."
   fi
   c_ok "Caché multimedia limpiada."
+}
+
+clean_games() {
+  c_section "CACHÉ DE JUEGOS"
+
+  local found=0
+  local cache="${XDG_CACHE_HOME:-$HOME/.cache}"
+  local cfg="${XDG_CONFIG_HOME:-$HOME/.config}"
+  local data="${XDG_DATA_HOME:-$HOME/.local/share}"
+
+  local game_procs="steam steamwebhelper lutris heroic heroic-games-launcher itch legendary bottles minigalaxy retroarch prismlauncher"
+  local open=""
+  local proc
+  for proc in $game_procs; do
+    if pgrep -x -u "$(id -u)" "$proc" >/dev/null 2>&1; then
+      open="$open $proc"
+    fi
+  done
+  if [ -n "$open" ] && [ "$DRY_RUN" -eq 0 ]; then
+    c_warn "Launchers de juegos abiertos:$open (ciérralos para una limpieza completa)."
+  fi
+
+  local steam_roots=(
+    "$HOME/.steam/steam"
+    "$data/Steam"
+  )
+  local seen_paths="|"
+  local steam_root
+  for steam_root in "${steam_roots[@]}"; do
+    [ -d "$steam_root" ] || continue
+
+    local steam_paths=(
+      "$steam_root/appcache/httpcache"
+      "$steam_root/config/htmlcache"
+      "$steam_root/logs"
+      "$steam_root/steamapps/shadercache"
+      "$steam_root/steamapps/temp"
+    )
+    local p
+    for p in "${steam_paths[@]}"; do
+      [ -d "$p" ] || continue
+      local key
+      key=$(path_key "$p")
+      case "$seen_paths" in *"|$key|"*) continue ;; esac
+      seen_paths="${seen_paths}${key}|"
+      found=1
+      c_info "  $(echo "$p" | sed "s|$HOME|~|")"
+      run "rm -rf '$p/'* 2>/dev/null"
+    done
+  done
+
+  local game_dirs=(
+    "$cache/lutris"
+    "$data/lutris/cache"
+    "$cfg/lutris/cache"
+    "$cache/heroic"
+    "$cfg/heroic/Cache"
+    "$cfg/heroic/Code Cache"
+    "$cfg/heroic/GPUCache"
+    "$cfg/heroic/logs"
+    "$cache/legendary"
+    "$cfg/legendary/logs"
+    "$cache/itch"
+    "$cfg/itch/Cache"
+    "$cfg/itch/Code Cache"
+    "$cfg/itch/GPUCache"
+    "$cache/bottles"
+    "$data/bottles/temp"
+    "$cache/minigalaxy"
+    "$cache/retroarch"
+    "$data/PrismLauncher/cache"
+    "$data/PrismLauncher/logs"
+    "$HOME/.minecraft/logs"
+    "$HOME/.minecraft/crash-reports"
+  )
+
+  local d
+  for d in "${game_dirs[@]}"; do
+    if [ -d "$d" ]; then
+      local key
+      key=$(path_key "$d")
+      case "$seen_paths" in *"|$key|"*) continue ;; esac
+      seen_paths="${seen_paths}${key}|"
+      found=1
+      c_info "  $(echo "$d" | sed "s|$HOME|~|")"
+      run "rm -rf '$d/'* 2>/dev/null"
+    fi
+  done
+
+  if [ "$found" -eq 0 ]; then
+    c_info "  No se detectaron cachés de juegos."
+  fi
+  c_ok "Cachés de juegos limpiadas."
 }
 
 clean_junk() {
@@ -705,9 +889,14 @@ clean_status() {
   printf '  %-30s %12s  →  %-12s\n' "RUTA" "ANTES" "AHORA"
   printf '  %-30s %12s  →  %-12s\n' "---" "-----" "----"
 
-  local paths=(/tmp /var/tmp /var/cache ~/.cache ~/.local/share/Trash ~/.nv /var/log)
+  local paths=(/tmp /var/tmp /var/cache ~/.cache ~/.local/share/Trash ~/.nv /var/log ~/.cache/vlc ~/.cache/mpv ~/.cache/obs-studio ~/.cache/kdenlive ~/.cache/shotcut ~/.cache/OpenShot ~/.cache/gimp ~/.cache/krita ~/.cache/inkscape ~/.cache/darktable ~/.cache/rawtherapee ~/.cache/digikam ~/.cache/audacity ~/.cache/ardour8 ~/.steam/steam/steamapps/shadercache ~/.local/share/Steam/steamapps/shadercache ~/.cache/lutris ~/.cache/heroic ~/.cache/legendary ~/.cache/itch)
+  local seen_paths="|"
   for p in "${paths[@]}"; do
     if [ -d "$p" ]; then
+      local key
+      key=$(path_key "$p")
+      case "$seen_paths" in *"|$key|"*) continue ;; esac
+      seen_paths="${seen_paths}${key}|"
       local sz
       sz=$(du -sh "$p" 2>/dev/null | cut -f1)
       printf '  %-30s %12s  →  %-12s\n' "$p" "${sz:-?}" "—"
@@ -721,11 +910,11 @@ clean_status() {
 main() {
   [ $# -eq 0 ] && usage 1
 
-  local do_temp=0 do_cache=0 do_logs=0 do_trash=0 do_thumbs=0 do_drives=0 do_browsers=0 do_ram=0 do_user_cache=0 do_dev=0 do_junk=0 do_wine=0 do_media=0 do_status=0 do_all=0
+  local do_temp=0 do_cache=0 do_logs=0 do_trash=0 do_thumbs=0 do_drives=0 do_browsers=0 do_ram=0 do_user_cache=0 do_dev=0 do_junk=0 do_wine=0 do_media=0 do_games=0 do_status=0 do_all=0
 
   while [ $# -gt 0 ]; do
     case "$1" in
-      -a|--all)     do_temp=1; do_cache=1; do_logs=1; do_trash=1; do_thumbs=1; do_drives=1; do_browsers=1; do_ram=1; do_user_cache=1; do_dev=1; do_junk=1; do_wine=1; do_media=1; do_all=1 ;;
+      -a|--all)     do_temp=1; do_cache=1; do_logs=1; do_trash=1; do_thumbs=1; do_drives=1; do_browsers=1; do_ram=1; do_user_cache=1; do_dev=1; do_junk=1; do_wine=1; do_media=1; do_games=1; do_all=1 ;;
       -t|--temp)    do_temp=1 ;;
       -c|--cache)   do_cache=1 ;;
       -l|--logs)    do_logs=1 ;;
@@ -739,6 +928,7 @@ main() {
       -j|--junk)    do_junk=1 ;;
       -w|--wine)    do_wine=1 ;;
       -M|--media)   do_media=1 ;;
+      -g|--games)   do_games=1 ;;
       -s|--status)  do_status=1 ;;
       -n|--dry-run) DRY_RUN=1 ;;
       -I|--interactive) INTERACTIVE=1 ;;
@@ -766,16 +956,17 @@ main() {
     local hr="--------------------------------------------"
     local cache="${XDG_CACHE_HOME:-$HOME/.cache}"
 
-    echo
-    printf '  \033[1;36m%s\033[0m\n' "$divider"
-    printf '  \033[1;37;46m   CLEANER -- Escaneo del sistema   \033[0m\n'
-    printf '  \033[1;36m%s\033[0m\n' "$divider"
-    echo
+    tui_header "CLEANER TUI 2026 -- Escaneo del sistema"
 
     local total_mb=0
+    local scan_cache=0
+    [ "$do_cache" -eq 1 ] || [ "$do_user_cache" -eq 1 ] && scan_cache=1
+    local scan_total=$((do_temp+scan_cache+do_logs+do_trash+do_browsers+do_media+do_games+do_wine+do_dev+do_junk))
+    local scan_current=0
 
     # --- TEMP ---
     if [ "$do_temp" -eq 1 ]; then
+      scan_current=$((scan_current + 1)); tui_scan_step "$scan_current" "$scan_total" "Buscando temporales en /tmp y /var/tmp"
       printf '  \033[1;33m[ TEMP ]\033[0m Archivos temporales\n'
       for p in /tmp /var/tmp; do
         if [ -d "$p" ]; then
@@ -789,6 +980,7 @@ main() {
 
     # --- CACHÉ ---
     if [ "$do_cache" -eq 1 ] || [ "$do_user_cache" -eq 1 ]; then
+      scan_current=$((scan_current + 1)); tui_scan_step "$scan_current" "$scan_total" "Midiendo cachés de sistema y usuario"
       printf '  \033[1;33m[ CACHE ]\033[0m Cachés del sistema y usuario\n'
       [ -d /var/cache/apt ]   && printf '  %-48s %8s\n' "/var/cache/apt/archives"   "$(path_size /var/cache/apt/archives)"
       [ -d "$cache" ]         && printf '  %-48s %8s\n' "~/.cache" "$(path_size "$cache")"
@@ -804,6 +996,7 @@ main() {
 
     # --- LOGS ---
     if [ "$do_logs" -eq 1 ]; then
+      scan_current=$((scan_current + 1)); tui_scan_step "$scan_current" "$scan_total" "Revisando logs y coredumps"
       printf '  \033[1;33m[ LOGS ]\033[0m Registros del sistema\n'
       printf '  %-48s %8s\n' "/var/log" "$(path_size /var/log)"
       if [ -d /var/lib/systemd/coredump ]; then
@@ -815,6 +1008,7 @@ main() {
 
     # --- TRASH ---
     if [ "$do_trash" -eq 1 ]; then
+      scan_current=$((scan_current + 1)); tui_scan_step "$scan_current" "$scan_total" "Revisando papelera del usuario"
       printf '  \033[1;33m[ TRASH ]\033[0m Papelera del usuario\n'
       local trash="${XDG_DATA_HOME:-$HOME/.local/share}/Trash"
       if [ -d "$trash/files" ]; then
@@ -826,6 +1020,7 @@ main() {
 
     # --- BROWSERS ---
     if [ "$do_browsers" -eq 1 ]; then
+      scan_current=$((scan_current + 1)); tui_scan_step "$scan_current" "$scan_total" "Detectando navegadores y cachés web"
       printf '  \033[1;33m[ BROWSERS ]\033[0m Caché de navegadores\n'
       # Contar rápido
       local cfgd="${XDG_CONFIG_HOME:-$HOME/.config}"
@@ -839,27 +1034,120 @@ main() {
 
     # --- MEDIA ---
     if [ "$do_media" -eq 1 ]; then
+      scan_current=$((scan_current + 1)); tui_scan_step "$scan_current" "$scan_total" "Buscando residuos multimedia y edición"
       printf '  \033[1;33m[ MEDIA ]\033[0m Cachés multimedia\n'
+      local cfgd="${XDG_CONFIG_HOME:-$HOME/.config}"
+      local data="${XDG_DATA_HOME:-$HOME/.local/share}"
+      local media_paths=(
+        "$cache/vlc"
+        "$cache/mpv"
+        "$cache/gstreamer-1.0"
+        "$cache/ffmpeg"
+        "$cache/obs-studio"
+        "$cfgd/obs-studio/logs"
+        "$cache/kdenlive"
+        "$data/kdenlive/proxy"
+        "$cache/shotcut"
+        "$cache/OpenShot"
+        "$cache/openshot-qt"
+        "$cache/pitivi"
+        "$cache/HandBrake"
+        "$cache/blender"
+        "$cache/gimp"
+        "$cache/krita"
+        "$cache/inkscape"
+        "$cache/darktable"
+        "$cache/rawtherapee"
+        "$cache/digikam"
+        "$cache/shotwell"
+        "$cache/gthumb"
+        "$cache/nomacs"
+        "$cache/pinta"
+        "$cache/mypaint"
+        "$cache/audacity"
+        "$cfgd/audacity/SessionData"
+        "$cache/ardour6"
+        "$cache/ardour7"
+        "$cache/ardour8"
+        "$cache/lmms"
+        "$cache/mixxx"
+      )
       local mc=0
-      for md in "$cache/vlc" "$cache/mpv" "$cache/gstreamer-1.0" "$cache/gimp" "$cache/krita" "$cache/ffmpeg"; do
-        [ -d "$md" ] && { mc=$((mc + 1)); printf '  %-48s %8s\n' "$(echo "$md" | sed "s|$HOME|~|")" "$(path_size "$md")"; }
+      local md
+      local seen_paths="|"
+      for md in "${media_paths[@]}" "$cfgd"/GIMP/*/tmp "$cfgd"/GIMP/*/templaterc.d "$cfgd"/RawTherapee*/cache "$cfgd"/darktable/cached_kernels_for_*; do
+        [ -d "$md" ] || continue
+        local key
+        key=$(path_key "$md")
+        case "$seen_paths" in *"|$key|"*) continue ;; esac
+        seen_paths="${seen_paths}${key}|"
+        mc=$((mc + 1))
+        printf '  %-48s %8s\n' "$(echo "$md" | sed "s|$HOME|~|")" "$(path_size "$md")"
       done
       [ "$mc" -gt 0 ] || printf '  %-48s %8s\n' "(no se detectaron)" "—"
       echo
     fi
 
-    # --- WINE ---
-    if [ "$do_wine" -eq 1 ] && [ -d "$HOME/.wine" ]; then
-      printf '  \033[1;33m[ WINE ]\033[0m Basura de Wine\n'
-      local uname; uname=$(id -un 2>/dev/null || echo "$USER")
-      for wp in "$HOME/.wine/drive_c/users/$uname/Temp" "$HOME/.wine/drive_c/users/$uname/AppData/Local/Temp" "$HOME/.wine/drive_c/windows/temp"; do
-        [ -d "$wp" ] && printf '  %-48s %8s\n' "$(echo "$wp" | sed "s|$HOME|~|")" "$(path_size "$wp")"
+    # --- GAMES ---
+    if [ "$do_games" -eq 1 ]; then
+      scan_current=$((scan_current + 1)); tui_scan_step "$scan_current" "$scan_total" "Buscando cachés de juegos y launchers"
+      printf '  \033[1;33m[ GAMES ]\033[0m Launchers y juegos\n'
+      local cfgd="${XDG_CONFIG_HOME:-$HOME/.config}"
+      local data="${XDG_DATA_HOME:-$HOME/.local/share}"
+      local game_paths=(
+        "$HOME/.steam/steam/appcache/httpcache"
+        "$HOME/.steam/steam/config/htmlcache"
+        "$HOME/.steam/steam/steamapps/shadercache"
+        "$data/Steam/appcache/httpcache"
+        "$data/Steam/config/htmlcache"
+        "$data/Steam/steamapps/shadercache"
+        "$cache/lutris"
+        "$cache/heroic"
+        "$cache/legendary"
+        "$cache/itch"
+        "$cache/bottles"
+        "$cache/minigalaxy"
+        "$cache/retroarch"
+        "$cfgd/heroic/Cache"
+        "$cfgd/itch/Cache"
+        "$data/PrismLauncher/cache"
+        "$HOME/.minecraft/logs"
+        "$HOME/.minecraft/crash-reports"
+      )
+      local gc=0
+      local gp
+      local seen_paths="|"
+      for gp in "${game_paths[@]}"; do
+        [ -d "$gp" ] || continue
+        local key
+        key=$(path_key "$gp")
+        case "$seen_paths" in *"|$key|"*) continue ;; esac
+        seen_paths="${seen_paths}${key}|"
+        gc=$((gc + 1))
+        printf '  %-48s %8s\n' "$(echo "$gp" | sed "s|$HOME|~|")" "$(path_size "$gp")"
       done
+      [ "$gc" -gt 0 ] || printf '  %-48s %8s\n' "(no se detectaron)" "—"
+      echo
+    fi
+
+    # --- WINE ---
+    if [ "$do_wine" -eq 1 ]; then
+      scan_current=$((scan_current + 1)); tui_scan_step "$scan_current" "$scan_total" "Revisando temporales de Wine"
+      printf '  \033[1;33m[ WINE ]\033[0m Basura de Wine\n'
+      if [ -d "$HOME/.wine" ]; then
+        local uname; uname=$(id -un 2>/dev/null || echo "$USER")
+        for wp in "$HOME/.wine/drive_c/users/$uname/Temp" "$HOME/.wine/drive_c/users/$uname/AppData/Local/Temp" "$HOME/.wine/drive_c/windows/temp"; do
+          [ -d "$wp" ] && printf '  %-48s %8s\n' "$(echo "$wp" | sed "s|$HOME|~|")" "$(path_size "$wp")"
+        done
+      else
+        printf '  %-48s %8s\n' "(no se detectó Wine)" "—"
+      fi
       echo
     fi
 
     # --- DEV ---
     if [ "$do_dev" -eq 1 ]; then
+      scan_current=$((scan_current + 1)); tui_scan_step "$scan_current" "$scan_total" "Midiendo cachés de desarrollo"
       printf '  \033[1;33m[ DEV ]\033[0m Herramientas de desarrollo\n'
       [ -d "$HOME/.gradle/caches" ]    && printf '  %-48s %8s\n' "~/.gradle/caches"    "$(path_size "$HOME/.gradle/caches")"
       [ -d "$HOME/.npm/_cacache" ]     && printf '  %-48s %8s\n' "~/.npm/_cacache"     "$(path_size "$HOME/.npm/_cacache")"
@@ -869,6 +1157,7 @@ main() {
 
     # --- JUNK ---
     if [ "$do_junk" -eq 1 ]; then
+      scan_current=$((scan_current + 1)); tui_scan_step "$scan_current" "$scan_total" "Buscando archivos basura seguros"
       printf '  \033[1;33m[ JUNK ]\033[0m Archivos basura\n'
       local jc=0
       jc=$(find /tmp /var/tmp "$HOME/Downloads" -maxdepth 3 -type f \( -name "*.swp" -o -name "*.bak" -o -name "*.old" -o -name "*.part" -o -name "*.crdownload" -o -name "*.tmp" -o -name "*.lock" \) 2>/dev/null | wc -l)
@@ -908,6 +1197,7 @@ main() {
     [ "$do_junk"    -eq 1 ] && task_list="$task_list Junk"
     [ "$do_wine"    -eq 1 ] && task_list="$task_list Wine"
     [ "$do_media"   -eq 1 ] && task_list="$task_list Media"
+    [ "$do_games"   -eq 1 ] && task_list="$task_list Games"
     c_info "Módulos a ejecutar:${task_list}"
 
     confirm_action "¿Ejecutar limpieza?"
@@ -916,19 +1206,26 @@ main() {
   local before after
   before=$(df --output=used / 2>/dev/null | tail -1 || echo 0)
 
-  [ "$do_temp"   -eq 1 ] && clean_temp
-  [ "$do_cache"  -eq 1 ] && clean_cache
-  [ "$do_logs"   -eq 1 ] && clean_logs
-  [ "$do_trash"  -eq 1 ] && clean_trash
-  [ "$do_thumbs" -eq 1 ] && clean_thumbs
-  [ "$do_browsers" -eq 1 ] && clean_browsers
-  [ "$do_ram" -eq 1 ] && clean_ram
-  [ "$do_drives" -eq 1 ] && clean_drives
-  [ "$do_user_cache" -eq 1 ] && clean_user_cache
-  [ "$do_dev" -eq 1 ] && clean_dev
-  [ "$do_junk" -eq 1 ] && clean_junk
-  [ "$do_wine" -eq 1 ] && clean_wine
-  [ "$do_media" -eq 1 ] && clean_media
+  TUI_TASK_TOTAL=$((do_temp+do_cache+do_logs+do_trash+do_thumbs+do_browsers+do_ram+do_drives+do_user_cache+do_dev+do_junk+do_wine+do_media+do_games))
+  TUI_TASK_CURRENT=0
+  if [ "$TUI_TASK_TOTAL" -gt 0 ]; then
+    tui_header "CLEANER TUI 2026 -- Borrado y limpieza"
+  fi
+
+  [ "$do_temp"   -eq 1 ] && tui_run_task "Temp" "Eliminando temporales del sistema" clean_temp
+  [ "$do_cache"  -eq 1 ] && tui_run_task "Cache" "Limpiando paquetes, huérfanos y /var/cache" clean_cache
+  [ "$do_logs"   -eq 1 ] && tui_run_task "Logs" "Rotando journal y retirando logs viejos" clean_logs
+  [ "$do_trash"  -eq 1 ] && tui_run_task "Trash" "Vaciando papelera del usuario" clean_trash
+  [ "$do_thumbs" -eq 1 ] && tui_run_task "Thumbs" "Borrando miniaturas regenerables" clean_thumbs
+  [ "$do_browsers" -eq 1 ] && tui_run_task "Browsers" "Limpiando cachés de navegadores" clean_browsers
+  [ "$do_ram" -eq 1 ] && tui_run_task "RAM" "Liberando page cache y swap" clean_ram
+  [ "$do_drives" -eq 1 ] && tui_run_task "Drives" "Limpiando papeleras de unidades montadas" clean_drives
+  [ "$do_user_cache" -eq 1 ] && tui_run_task "UserCache" "Limpiando cachés de usuario y shaders" clean_user_cache
+  [ "$do_dev" -eq 1 ] && tui_run_task "Dev" "Limpiando cachés de desarrollo" clean_dev
+  [ "$do_junk" -eq 1 ] && tui_run_task "Junk" "Buscando y borrando basura segura" clean_junk
+  [ "$do_wine" -eq 1 ] && tui_run_task "Wine" "Limpiando temporales de Wine y prefixes" clean_wine
+  [ "$do_media" -eq 1 ] && tui_run_task "Media" "Limpiando multimedia, edición y fotografía" clean_media
+  [ "$do_games" -eq 1 ] && tui_run_task "Games" "Limpiando cachés de juegos y launchers" clean_games
 
   after=$(df --output=used / 2>/dev/null | tail -1 || echo 0)
   if [ "$DRY_RUN" -eq 0 ] && [ "$before" -gt "$after" ] 2>/dev/null; then
@@ -939,7 +1236,7 @@ main() {
   [ "$do_status" -eq 1 ] && clean_status
 
   # Registrar en historial solo si fue limpieza real
-  if [ "$DRY_RUN" -eq 0 ]; then
+  if [ "$DRY_RUN" -eq 0 ] && [ $((do_temp+do_cache+do_logs+do_trash+do_thumbs+do_drives+do_browsers+do_ram+do_user_cache+do_dev+do_junk+do_wine+do_media+do_games)) -gt 0 ]; then
     local freed_mb=0
     if [ "$before" -gt "$after" ] 2>/dev/null; then
       freed_mb=$(( (before - after) / 1024 ))

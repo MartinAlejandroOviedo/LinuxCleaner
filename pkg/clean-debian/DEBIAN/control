@@ -1,5 +1,5 @@
 Package: clean-debian
-Version: 1.2.0
+Version: 1.3.1
 Section: admin
 Priority: optional
 Architecture: all
@@ -13,7 +13,10 @@ Description: Limpiador de archivos temporales y residuales para Debian
  papelera, miniaturas, cache de 22 navegadores, cache del kernel y swap,
  papeleras de unidades montadas, ~/.cache completo, herramientas de
  desarrollo, archivos basura (*.swp, *.pyc, __pycache__), temporales de
- Wine, y caches multimedia (VLC, GStreamer, GIMP, etc.).
+ Wine, caches multimedia y de edicion (VLC, OBS, Kdenlive, GIMP, Krita,
+ Darktable, Audacity, etc.) y caches de juegos (Steam, Lutris, Heroic,
+ Legendary, itch, RetroArch, PrismLauncher, etc.).
  .
- Incluye modo simulacion (--dry-run), modo interactivo con escaneo TUI
- (--interactive), reporte de espacio (--status) e historial de limpiezas.
+ Incluye modo simulacion (--dry-run), TUI interactiva con barras de progreso
+ de escaneo y borrado (--interactive), reporte de espacio (--status) e
+ historial de limpiezas.

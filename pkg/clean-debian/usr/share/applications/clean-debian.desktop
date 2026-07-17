@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=Linux Cleaner
+GenericName=System Cleaner
+GenericName[es]=Limpiador del sistema
+Comment=Clean temporary files, caches, logs and residual data
+Comment[es]=Limpia temporales, caches, logs y residuos del sistema
+Exec=clean --all
+Icon=utilities-terminal
+Terminal=true
+Categories=Utility;
+Keywords=clean;cache;logs;trash;system;linux;limpieza;temporales;
