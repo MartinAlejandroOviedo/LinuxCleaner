@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.5.2 - 2026-07-16
+
+- --apt-check ahora ofrece auto-fix para duplicados en sources.list.
+- Comenta lineas duplicadas que ya existen en formato .sources.
+- Pide confirmacion antes de modificar archivos de sistema.
+
+
 ## 1.5.1 - 2026-07-16
 
 - Nuevo: `--apt-check` / `-K` para diagnosticar fuentes APT (duplicados, claves GPG, repos caídos).

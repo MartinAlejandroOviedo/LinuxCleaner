@@ -156,6 +156,17 @@ confirm_action() {
   esac
 }
 
+# Versión que no sale del script (útil para preguntas dentro de módulos)
+ask_yesno() {
+  local msg="${1:-¿Continuar?}"
+  local answer
+  read -r -p "$msg (s/N): " answer
+  case "$answer" in
+    [sS]|[sS][iIíÍ]) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 need_root() {
   if [ "$(id -u)" -ne 0 ]; then
     if command -v sudo >/dev/null 2>&1; then
@@ -333,7 +344,44 @@ clean_apt_check() {
   [ -n "$(ls /etc/apt/sources.list.d/*.sources 2>/dev/null)" ] && has_sources=1
   if [ "$has_list" -eq 1 ] && [ "$has_sources" -eq 1 ]; then
     c_info "  Conviven .list y .sources en sources.list.d/ (puede generar duplicados)."
-    c_info "  Revisá si algún repositorio está definido en ambos formatos."
+  fi
+
+  # 5. Auto-fix: ofrecer arreglar duplicados comentando sources.list
+  local fix_lines
+  fix_lines=$(echo "$apt_output" | grep -oP 'en \S+:\d+' | grep 'sources\.list:' | sort -u || true)
+  if [ -n "$fix_lines" ] && [ "$issues" -gt 0 ]; then
+    echo
+    c_info "Líneas duplicadas detectadas en /etc/apt/sources.list:"
+    echo
+    local ln
+    while IFS= read -r entry; do
+      [ -z "$entry" ] && continue
+      local file="${entry%%:*}"
+      local num="${entry##*:}"
+      local content
+      content=$(sed -n "${num}p" "$file" 2>/dev/null)
+      printf '    \033[1;33mLínea %s:\033[0m \033[2m%s\033[0m\n' "$num" "$content"
+    done <<< "$fix_lines"
+    echo
+    c_info "Estas líneas están duplicadas por archivos .sources equivalentes."
+    c_info "El fix seguro es comentarlas en sources.list (las .sources tienen prioridad)."
+
+    if [ "$DRY_RUN" -eq 0 ]; then
+      confirm_action "¿Comentar estas líneas duplicadas en sources.list?"
+      local comment_rc=$?
+      if [ $comment_rc -eq 0 ]; then
+        while IFS= read -r entry; do
+          [ -z "$entry" ] && continue
+          local file="${entry%%:*}"
+          local num="${entry##*:}"
+          $SUDO sed -i "${num}s/^/# CLEAN: duplicado --> /" "$file" 2>/dev/null
+          c_ok "  Comentada línea $num en $file"
+        done <<< "$fix_lines"
+        c_info "Ejecutá 'sudo apt update' para verificar que no haya más warnings."
+      fi
+    else
+      printf '    \033[2m(dry-run)\033[0m Se comentarían las líneas en sources.list\n'
+    fi
   fi
 
   if [ "$issues" -eq 0 ]; then
@@ -747,21 +795,53 @@ clean_media() {
   }
 
   # ── Audio ──
-  # PulseAudio (solo si no está corriendo)
-  if pgrep -x pulseaudio >/dev/null 2>&1; then
-    c_warn "  PulseAudio está corriendo; se omiten sus cachés para no interrumpir el audio."
-  else
-    if [ -d "$cache/pulse" ]; then
-      clean_media_dir "$cache/pulse"
+  # PulseAudio / PipeWire (caché se regenera, seguro incluso andando)
+  # Si está corriendo, ofrecemos reiniciarlo para limpiar a fondo
+  local restart_pipewire=0 restart_pulse=0
+
+  if pgrep -x pipewire >/dev/null 2>&1; then
+    c_warn "  PipeWire está corriendo."
+    if [ "$DRY_RUN" -eq 0 ] && command -v systemctl >/dev/null 2>&1; then
+      if ask_yesno "¿Reiniciar PipeWire para limpiar su caché? (audio se corta 1-2s)"; then
+        restart_pipewire=1
+      fi
     fi
   fi
-  # PipeWire (solo si no está corriendo)
-  if pgrep -x pipewire >/dev/null 2>&1; then
-    c_warn "  PipeWire está corriendo; se omiten sus cachés."
-  else
-    if [ -d "$cache/pipewire" ]; then
-      clean_media_dir "$cache/pipewire"
+  if pgrep -x pulseaudio >/dev/null 2>&1; then
+    c_warn "  PulseAudio está corriendo."
+    if [ "$DRY_RUN" -eq 0 ] && command -v systemctl >/dev/null 2>&1; then
+      if ask_yesno "¿Reiniciar PulseAudio para limpiar su caché? (audio se corta 1-2s)"; then
+        restart_pulse=1
+      fi
     fi
+  fi
+
+  # Parar los servicios si el usuario aceptó
+  if [ "$restart_pipewire" -eq 1 ]; then
+    c_info "  Deteniendo PipeWire..."
+    run "systemctl --user stop pipewire.service pipewire-pulse.service pipewire.socket 2>/dev/null"
+  fi
+  if [ "$restart_pulse" -eq 1 ]; then
+    c_info "  Deteniendo PulseAudio..."
+    run "systemctl --user stop pulseaudio.service pulseaudio.socket 2>/dev/null"
+  fi
+
+  # Limpiar cachés
+  if [ -d "$cache/pulse" ]; then
+    clean_media_dir "$cache/pulse"
+  fi
+  if [ -d "$cache/pipewire" ]; then
+    clean_media_dir "$cache/pipewire"
+  fi
+
+  # Rearrancar los servicios
+  if [ "$restart_pipewire" -eq 1 ]; then
+    c_info "  Rearrancando PipeWire..."
+    run "systemctl --user start pipewire.socket pipewire.service pipewire-pulse.service 2>/dev/null"
+  fi
+  if [ "$restart_pulse" -eq 1 ]; then
+    c_info "  Rearrancando PulseAudio..."
+    run "systemctl --user start pulseaudio.socket pulseaudio.service 2>/dev/null"
   fi
 
   # ── Video, streaming y edición ──
