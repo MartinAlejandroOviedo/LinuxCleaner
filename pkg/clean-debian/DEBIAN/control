@@ -1,12 +1,12 @@
 Package: clean-debian
-Version: 1.5.2
+Version: 1.6.0
 Section: admin
 Priority: optional
 Architecture: all
 Depends: coreutils, findutils, util-linux
 Recommends: apt, sudo
 Maintainer: Martin <martin@debian>
-Installed-Size: 80
+Installed-Size: 92
 Description: Limpiador de archivos temporales y residuales para Debian
  Proporciona el comando "clean" para eliminar de forma segura archivos
  temporales, caches de paquetes (APT/DNF/Pacman/Portage), logs, coredumps,
@@ -17,6 +17,6 @@ Description: Limpiador de archivos temporales y residuales para Debian
  Darktable, Audacity, etc.) y caches de juegos (Steam, Lutris, Heroic,
  Legendary, itch, RetroArch, PrismLauncher, etc.).
  .
- Incluye modo simulacion (--dry-run), TUI interactiva con barras de progreso
- de escaneo y borrado (--interactive), reporte de espacio (--status) e
- historial de limpiezas.
+ Incluye modo simulacion (--dry-run), TUI interactiva con progreso global y
+ granular por elemento, progreso nativo de APT/dpkg, reporte de espacio
+ (--status) e historial de limpiezas.

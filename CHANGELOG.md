@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.6.0 - 2026-07-21
+
+- Nueva barra de progreso granular actualizada sobre una sola linea.
+- Muestra porcentaje y contador real de elementos durante la limpieza de papeleras, miniaturas y caches de usuario y desarrollo.
+- Conserva el progreso nativo de APT/dpkg durante la eliminacion de paquetes huerfanos.
+- El modo `--dry-run` informa cuantos elementos procesaria sin eliminarlos.
+- Corrige el total global para incluir los modulos `--venv` y `--apt-check`.
+
 ## 1.5.2 - 2026-07-16
 
 - --apt-check ahora ofrece auto-fix para duplicados en sources.list.

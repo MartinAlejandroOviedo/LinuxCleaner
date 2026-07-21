@@ -6,7 +6,7 @@
 ![Static Badge](https://img.shields.io/badge/fedora-supported-blue?logo=fedora)
 ![Static Badge](https://img.shields.io/badge/arch-supported-blue?logo=archlinux)
 ![Static Badge](https://img.shields.io/badge/license-MIT-green)
-![Static Badge](https://img.shields.io/badge/version-1.5.2-white)
+![Static Badge](https://img.shields.io/badge/version-1.6.0-white)
 
 ```bash
 $ clean --all
@@ -61,7 +61,7 @@ $ clean --all
 ### Desde .deb (Debian/Ubuntu)
 
 ```bash
-sudo apt install ./releases/clean-debian_1.5.2_all.deb
+sudo apt install ./releases/clean-debian_1.6.0_all.deb
 ```
 
 ### Manual (cualquier distro)
@@ -80,6 +80,24 @@ clean --all --dry-run        # simulación: muestra qué haría sin borrar
 clean --browsers --dev       # solo tareas específicas
 clean --status               # reporte de espacio ocupado
 clean --help                 # ayuda completa
+```
+
+## 📊 Progreso granular
+
+Durante la limpieza, `clean` muestra dos niveles de avance:
+
+- **Progreso global:** indica cuantos modulos terminaron y el porcentaje total.
+- **Progreso granular:** actualiza una sola linea con el porcentaje y el contador
+  real de elementos procesados dentro de papeleras, miniaturas y caches de
+  usuario, Gradle, npm, Cargo, pip, Yarn, Go, NVIDIA y Mesa.
+
+Las operaciones de paquetes conservan la barra nativa de APT/dpkg. Los comandos
+que no ofrecen un total medible, como `journalctl` o la gestion de swap, muestran
+actividad sin inventar un porcentaje. Al redirigir la salida a un archivo, no se
+emiten secuencias de redibujado de terminal.
+
+```text
+Progreso: [########################        ]  75%  3/4  Cache npm
 ```
 
 ## ⚡ Todas las opciones
@@ -218,7 +236,7 @@ Busca en `/tmp`, `/var/tmp`, `~/Downloads`, `~/Desktop`, `~/Documentos` y `~/Esc
 ```bash
 cd pkg
 mkdir -p ../releases
-fakeroot dpkg-deb --build clean-debian ../releases/clean-debian_1.5.2_all.deb
+dpkg-deb --root-owner-group --build clean-debian ../releases/clean-debian_1.6.0_all.deb
 ```
 
 ## 📄 Licencia

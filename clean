@@ -38,6 +38,7 @@ HISTFILE="${XDG_CACHE_HOME:-$HOME/.cache}/clean-history.log"
 SUDO=""
 TUI_TASK_CURRENT=0
 TUI_TASK_TOTAL=0
+TUI_INLINE_ACTIVE=0
 
 # ------------------------------------------------------------------ helpers
 c_info()  { printf '\033[1;34m[*]\033[0m %s\n' "$1"; }
@@ -84,6 +85,70 @@ tui_progress() {
   printf '  \033[1;36m%-8s\033[0m [%s%s] \033[1;37m%3d%%\033[0m  %s\n' "$phase" "$bar_done" "$bar_empty" "$percent" "$detail"
 }
 
+# Barra granular de una operación. En una terminal se redibuja sobre la misma
+# línea; al redirigir la salida sólo imprime el resultado final (sin escapes).
+tui_item_progress() {
+  local current="$1" total="$2" detail="$3"
+  [ "$total" -gt 0 ] || total=1
+  [ "$current" -gt "$total" ] && current="$total"
+
+  local width=32
+  local percent=$(( current * 100 / total ))
+  local filled=$(( current * width / total ))
+  local empty=$(( width - filled ))
+  local bar_done bar_empty
+  bar_done=$(printf '%*s' "$filled" '' | tr ' ' '#')
+  bar_empty=$(printf '%*s' "$empty" '' | tr ' ' ' ')
+
+  if [ -t 1 ]; then
+    printf '\r\033[2K  \033[1;32mProgreso:\033[0m [\033[42m%s\033[0m%s] \033[1;37m%3d%%\033[0m  %d/%d  %s' \
+      "$bar_done" "$bar_empty" "$percent" "$current" "$total" "$detail"
+    TUI_INLINE_ACTIVE=1
+  elif [ "$current" -eq "$total" ]; then
+    printf '  Progreso: 100%%  %d/%d  %s\n' "$current" "$total" "$detail"
+  fi
+}
+
+tui_item_progress_end() {
+  if [ "$TUI_INLINE_ACTIVE" -eq 1 ]; then
+    printf '\n'
+    TUI_INLINE_ACTIVE=0
+  fi
+}
+
+# Elimina el contenido inmediato de un directorio y muestra progreso real por
+# elemento. Usar find incluye correctamente archivos ocultos y nombres raros.
+clean_dir_contents_progress() {
+  local dir="$1" label="$2" privileged="${3:-0}"
+  [ -d "$dir" ] || return 0
+
+  local entries=()
+  if [ "$privileged" -eq 1 ] && [ -n "$SUDO" ]; then
+    mapfile -d '' -t entries < <($SUDO find "$dir" -mindepth 1 -maxdepth 1 -print0 2>/dev/null)
+  else
+    mapfile -d '' -t entries < <(find "$dir" -mindepth 1 -maxdepth 1 -print0 2>/dev/null)
+  fi
+
+  local total=${#entries[@]}
+  [ "$total" -gt 0 ] || return 0
+  if [ "$DRY_RUN" -eq 1 ]; then
+    printf '    \033[2m(dry-run)\033[0m rm -rf -- contenido de %q (%d elementos)\n' "$dir" "$total"
+  fi
+  local current=0 entry
+  for entry in "${entries[@]}"; do
+    if [ "$DRY_RUN" -eq 1 ]; then
+      :
+    elif [ "$privileged" -eq 1 ] && [ -n "$SUDO" ]; then
+      $SUDO rm -rf -- "$entry" 2>/dev/null || true
+    else
+      rm -rf -- "$entry" 2>/dev/null || true
+    fi
+    current=$((current + 1))
+    tui_item_progress "$current" "$total" "$label"
+  done
+  tui_item_progress_end
+}
+
 tui_scan_step() {
   local current="$1" total="$2" detail="$3"
   tui_progress "Escaneo" "$current" "$total" "$detail"
@@ -91,9 +156,10 @@ tui_scan_step() {
 
 tui_run_task() {
   local label="$1" detail="$2" fn="$3"
-  TUI_TASK_CURRENT=$((TUI_TASK_CURRENT + 1))
   tui_progress "Borrado" "$TUI_TASK_CURRENT" "$TUI_TASK_TOTAL" "$detail"
+  TUI_TASK_CURRENT=$((TUI_TASK_CURRENT + 1))
   "$fn"
+  tui_progress "Borrado" "$TUI_TASK_CURRENT" "$TUI_TASK_TOTAL" "Completado: $label"
   c_ok "Módulo completado: $label"
 }
 
@@ -132,6 +198,18 @@ run_spin() {
     printf "\r    \033[1;33m!\033[0m %s (código $rc)\n" "$msg"
   fi
   return $rc
+}
+
+# APT/dpkg ya conoce el avance de cada paquete. Ejecutarlo en primer plano
+# conserva su barra nativa en vez de cubrirla con nuestro spinner.
+run_apt() {
+  local msg="$1" cmd="$2"
+  if [ "$DRY_RUN" -eq 1 ]; then
+    printf '    \033[2m(dry-run)\033[0m %s\n' "$cmd"
+    return 0
+  fi
+  c_info "$msg"
+  eval "$cmd"
 }
 
 log_history() {
@@ -250,7 +328,7 @@ clean_cache() {
     c_info "  Gestor: APT (Debian/Ubuntu)"
     run_spin "  Limpiando caché APT..." "$SUDO apt-get clean -y"
     run_spin "  Auto-limpieza APT..." "$SUDO apt-get autoclean -y"
-    run_spin "  Removiendo huérfanos..." "$SUDO apt-get autoremove --purge -y"
+    run_apt "  Removiendo huérfanos (progreso de APT/dpkg)..." "$SUDO apt-get -o Dpkg::Progress-Fancy=1 autoremove --purge -y"
     run "$SUDO find /var/cache/apt/archives -maxdepth 1 -type f -name '*.deb' -delete 2>/dev/null"
 
     # Purga configuraciones residuales (estado 'rc')
@@ -416,7 +494,8 @@ clean_trash() {
   c_info "Vaciando papelera del usuario..."
   local trash="${XDG_DATA_HOME:-$HOME/.local/share}/Trash"
   if [ -d "$trash" ]; then
-    run "rm -rf '$trash/files/'* '$trash/info/'* 2>/dev/null"
+    clean_dir_contents_progress "$trash/files" "Papelera: archivos"
+    clean_dir_contents_progress "$trash/info" "Papelera: metadatos"
   fi
   c_ok "Papelera vaciada."
 }
@@ -424,8 +503,8 @@ clean_trash() {
 clean_thumbs() {
   c_info "Limpiando miniaturas y cachés de usuario..."
   local cache="${XDG_CACHE_HOME:-$HOME/.cache}"
-  [ -d "$cache/thumbnails" ] && run "rm -rf '$cache/thumbnails/'* 2>/dev/null"
-  [ -d "$HOME/.thumbnails" ]  && run "rm -rf '$HOME/.thumbnails/'* 2>/dev/null"
+  [ -d "$cache/thumbnails" ] && clean_dir_contents_progress "$cache/thumbnails" "Miniaturas XDG"
+  [ -d "$HOME/.thumbnails" ]  && clean_dir_contents_progress "$HOME/.thumbnails" "Miniaturas heredadas"
   c_ok "Miniaturas limpiadas."
 }
 
@@ -594,7 +673,7 @@ clean_user_cache() {
     local before
     before=$(path_size "$cache")
     # Borra todo ~/.cache excepto el propio script de limpieza
-    run "find '$cache' -mindepth 1 -maxdepth 1 -exec rm -rf {} + 2>/dev/null"
+    clean_dir_contents_progress "$cache" "Caché del usuario"
     local after
     after=$(path_size "$cache")
     c_info "  Antes: ${before:-?}  Después: ${after:-?}"
@@ -605,14 +684,14 @@ clean_user_cache() {
     local nv_size
     nv_size=$(path_size "$HOME/.nv")
     c_info "Limpiando caché NVIDIA (~/.nv): ${nv_size:-?}"
-    run "rm -rf '$HOME/.nv/'* 2>/dev/null"
+    clean_dir_contents_progress "$HOME/.nv" "Shaders NVIDIA"
   fi
   # Mesa (OpenGL/Vulkan) shader cache
   if [ -d "$HOME/.mesa_shader_cache" ]; then
     local mesa_size
     mesa_size=$(path_size "$HOME/.mesa_shader_cache")
     c_info "Limpiando Mesa shader cache (~/.mesa_shader_cache): ${mesa_size:-?}"
-    run "rm -rf '$HOME/.mesa_shader_cache/'* 2>/dev/null"
+    clean_dir_contents_progress "$HOME/.mesa_shader_cache" "Shaders Mesa"
   fi
   c_ok "Caché de usuario limpiada."
 }
@@ -624,24 +703,24 @@ clean_dev() {
   # Gradle
   if [ -d "$HOME/.gradle/caches" ]; then
     c_info "  Gradle"
-    run "rm -rf '$HOME/.gradle/caches/'* 2>/dev/null"
+    clean_dir_contents_progress "$HOME/.gradle/caches" "Caché Gradle"
     found=1
   fi
   # npm
   if [ -d "$HOME/.npm/_cacache" ]; then
     c_info "  npm"
-    run "rm -rf '$HOME/.npm/_cacache/'* 2>/dev/null"
+    clean_dir_contents_progress "$HOME/.npm/_cacache" "Caché npm"
     found=1
   fi
   # Cargo (Rust) - más profundo
   if [ -d "$HOME/.cargo/registry/cache" ]; then
     c_info "  Cargo (registry cache)"
-    run "rm -rf '$HOME/.cargo/registry/cache/'* 2>/dev/null"
+    clean_dir_contents_progress "$HOME/.cargo/registry/cache" "Caché Cargo"
     found=1
   fi
   if [ -d "$HOME/.cargo/registry/src" ]; then
     c_info "  Cargo (registry src)"
-    run "rm -rf '$HOME/.cargo/registry/src/'* 2>/dev/null"
+    clean_dir_contents_progress "$HOME/.cargo/registry/src" "Fuentes Cargo"
     found=1
   fi
   # Cargo toolchain cache
@@ -654,7 +733,7 @@ clean_dev() {
   local pip_cache="${XDG_CACHE_HOME:-$HOME/.cache}/pip"
   if [ -d "$pip_cache" ]; then
     c_info "  pip (HTTP/wheels cache)"
-    run "rm -rf '$pip_cache/'* 2>/dev/null"
+    clean_dir_contents_progress "$pip_cache" "Caché pip"
     found=1
   fi
   # pip cache purge (wheels y HTTP cache interna)
@@ -669,7 +748,7 @@ clean_dev() {
   # Yarn
   if [ -d "$HOME/.yarn/cache" ]; then
     c_info "  Yarn"
-    run "rm -rf '$HOME/.yarn/cache/'* 2>/dev/null"
+    clean_dir_contents_progress "$HOME/.yarn/cache" "Caché Yarn"
     found=1
   fi
   # Maven (~/.m2/repository)
@@ -682,7 +761,7 @@ clean_dev() {
   # Go module cache - profundo
   if [ -d "$HOME/go/pkg/mod/cache" ]; then
     c_info "  Go modules (download cache)"
-    run "rm -rf '$HOME/go/pkg/mod/cache/'* 2>/dev/null"
+    clean_dir_contents_progress "$HOME/go/pkg/mod/cache" "Caché Go modules"
     found=1
   fi
   # go clean nativo (si go está en PATH)
@@ -1476,6 +1555,8 @@ main() {
     [ "$do_wine"    -eq 1 ] && task_list="$task_list Wine"
     [ "$do_media"   -eq 1 ] && task_list="$task_list Media"
     [ "$do_games"   -eq 1 ] && task_list="$task_list Games"
+    [ "$do_venv"    -eq 1 ] && task_list="$task_list PythonVenv"
+    [ "$do_apt_check" -eq 1 ] && task_list="$task_list AptCheck"
     c_info "Módulos a ejecutar:${task_list}"
 
     confirm_action "¿Ejecutar limpieza?"
@@ -1484,7 +1565,7 @@ main() {
   local before after
   before=$(df --output=used / 2>/dev/null | tail -1 || echo 0)
 
-  TUI_TASK_TOTAL=$((do_temp+do_cache+do_logs+do_trash+do_thumbs+do_browsers+do_ram+do_drives+do_user_cache+do_dev+do_junk+do_wine+do_media+do_games))
+  TUI_TASK_TOTAL=$((do_temp+do_cache+do_logs+do_trash+do_thumbs+do_browsers+do_ram+do_drives+do_user_cache+do_dev+do_junk+do_wine+do_media+do_games+do_venv+do_apt_check))
   TUI_TASK_CURRENT=0
   if [ "$TUI_TASK_TOTAL" -gt 0 ]; then
     tui_header "CLEANER TUI 2026 -- Borrado y limpieza"
