@@ -39,6 +39,11 @@ SUDO=""
 TUI_TASK_CURRENT=0
 TUI_TASK_TOTAL=0
 TUI_INLINE_ACTIVE=0
+TUI_MODULE_ACTIVE=0
+TUI_MODULE_PROGRESS=0
+TUI_LAST_OVERALL_PERMILLE=0
+TUI_LIVE_ACTIVE=0
+TUI_LIVE_ROW=0
 
 # ------------------------------------------------------------------ helpers
 c_info()  { printf '\033[1;34m[*]\033[0m %s\n' "$1"; }
@@ -50,6 +55,7 @@ term_width() {
   local cols
   cols=$(tput cols 2>/dev/null || printf '80')
   [ "$cols" -lt 60 ] && cols=60
+  [ "$cols" -gt 100 ] && cols=100
   printf '%s\n' "$cols"
 }
 
@@ -82,7 +88,61 @@ tui_progress() {
   bar_done=$(printf '%*s' "$filled" '' | tr ' ' '#')
   bar_empty=$(printf '%*s' "$empty" '' | tr ' ' '.')
 
+  if [ "$phase" = "Borrado" ] && [ "$TUI_LIVE_ACTIVE" -eq 1 ]; then
+    tui_live_render "$percent" "$detail"
+    return 0
+  fi
+
   printf '  \033[1;36m%-8s\033[0m [%s%s] \033[1;37m%3d%%\033[0m  %s\n' "$phase" "$bar_done" "$bar_empty" "$percent" "$detail"
+}
+
+# Reserva la última fila de la terminal para una barra persistente. El resto de
+# la salida se desplaza dentro de una región que termina una fila antes.
+tui_live_start() {
+  [ -t 1 ] || return 0
+  local rows
+  rows=$(tput lines 2>/dev/null || printf '0')
+  [ "$rows" -ge 6 ] || return 0
+  TUI_LIVE_ROW=$rows
+  TUI_LIVE_ACTIVE=1
+  # Región de scroll: todas las filas salvo la última.
+  printf '\033[1;%dr\033[%d;1H' "$((rows - 1))" "$((rows - 1))"
+  tui_live_render 0 "Preparando limpieza"
+}
+
+tui_live_render() {
+  local percent="$1" detail="$2" count="${3:-}"
+  [ "$TUI_LIVE_ACTIVE" -eq 1 ] || return 0
+  [ "$percent" -lt 0 ] && percent=0
+  [ "$percent" -gt 100 ] && percent=100
+
+  local width=32
+  local filled=$((percent * width / 100))
+  local empty=$((width - filled))
+  local bar_done bar_empty suffix=""
+  bar_done=$(printf '%*s' "$filled" '' | tr ' ' '#')
+  bar_empty=$(printf '%*s' "$empty" '')
+  [ -n "$count" ] && suffix=" ($count)"
+
+  # Guardar cursor, dibujar abajo y volver exactamente al flujo de mensajes.
+  printf '\0337\033[%d;1H\033[2K  \033[1;32mProgreso global:\033[0m [\033[42m%s\033[0m%s] \033[1;37m%3d%%\033[0m  %s%s\0338' \
+    "$TUI_LIVE_ROW" "$bar_done" "$bar_empty" "$percent" "$detail" "$suffix"
+}
+
+tui_live_stop() {
+  [ "$TUI_LIVE_ACTIVE" -eq 1 ] || return 0
+  tui_live_render 100 "Limpieza completada"
+  # Restaurar los márgenes antes de devolver el control al shell.
+  printf '\033[r\033[%d;1H\n' "$TUI_LIVE_ROW"
+  TUI_LIVE_ACTIVE=0
+  TUI_LIVE_ROW=0
+}
+
+tui_live_abort() {
+  if [ "$TUI_LIVE_ACTIVE" -eq 1 ]; then
+    printf '\033[r\033[%d;1H\033[2K' "$TUI_LIVE_ROW"
+    TUI_LIVE_ACTIVE=0
+  fi
 }
 
 # Barra granular de una operación. En una terminal se redibuja sobre la misma
@@ -92,20 +152,38 @@ tui_item_progress() {
   [ "$total" -gt 0 ] || total=1
   [ "$current" -gt "$total" ] && current="$total"
 
+  local local_percent=$(( current * 100 / total ))
+  local percent=$local_percent
+  if [ "$TUI_MODULE_ACTIVE" -eq 1 ] && [ "$TUI_TASK_TOTAL" -gt 0 ]; then
+    local stage_start=$TUI_MODULE_PROGRESS
+    local remaining=$((900 - stage_start))
+    local stage_span=$((remaining / 2))
+    [ "$stage_span" -lt 1 ] && stage_span=1
+    local module_progress=$((stage_start + stage_span * current / total))
+    [ "$module_progress" -gt 900 ] && module_progress=900
+    local overall_permille=$(( (TUI_TASK_CURRENT * 1000 + module_progress) / TUI_TASK_TOTAL ))
+    [ "$overall_permille" -lt "$TUI_LAST_OVERALL_PERMILLE" ] && overall_permille=$TUI_LAST_OVERALL_PERMILLE
+    TUI_LAST_OVERALL_PERMILLE=$overall_permille
+    percent=$((overall_permille / 10))
+  fi
+
   local width=32
-  local percent=$(( current * 100 / total ))
-  local filled=$(( current * width / total ))
+  local filled=$(( percent * width / 100 ))
   local empty=$(( width - filled ))
   local bar_done bar_empty
   bar_done=$(printf '%*s' "$filled" '' | tr ' ' '#')
   bar_empty=$(printf '%*s' "$empty" '' | tr ' ' ' ')
 
   if [ -t 1 ]; then
-    printf '\r\033[2K  \033[1;32mProgreso:\033[0m [\033[42m%s\033[0m%s] \033[1;37m%3d%%\033[0m  %d/%d  %s' \
-      "$bar_done" "$bar_empty" "$percent" "$current" "$total" "$detail"
-    TUI_INLINE_ACTIVE=1
+    if [ "$TUI_LIVE_ACTIVE" -eq 1 ]; then
+      tui_live_render "$percent" "$detail" "$current/$total"
+    else
+      printf '\r\033[2K  \033[1;32mProgreso global:\033[0m [\033[42m%s\033[0m%s] \033[1;37m%3d%%\033[0m  %s (%d/%d)' \
+        "$bar_done" "$bar_empty" "$percent" "$detail" "$current" "$total"
+      TUI_INLINE_ACTIVE=1
+    fi
   elif [ "$current" -eq "$total" ]; then
-    printf '  Progreso: 100%%  %d/%d  %s\n' "$current" "$total" "$detail"
+    printf '  Progreso global: %d%%  %s (%d/%d)\n' "$percent" "$detail" "$current" "$total"
   fi
 }
 
@@ -146,6 +224,13 @@ clean_dir_contents_progress() {
     current=$((current + 1))
     tui_item_progress "$current" "$total" "$label"
   done
+  if [ "$TUI_MODULE_ACTIVE" -eq 1 ]; then
+    local remaining=$((900 - TUI_MODULE_PROGRESS))
+    local stage_span=$((remaining / 2))
+    [ "$stage_span" -lt 1 ] && stage_span=1
+    TUI_MODULE_PROGRESS=$((TUI_MODULE_PROGRESS + stage_span))
+    [ "$TUI_MODULE_PROGRESS" -gt 900 ] && TUI_MODULE_PROGRESS=900
+  fi
   tui_item_progress_end
 }
 
@@ -157,8 +242,12 @@ tui_scan_step() {
 tui_run_task() {
   local label="$1" detail="$2" fn="$3"
   tui_progress "Borrado" "$TUI_TASK_CURRENT" "$TUI_TASK_TOTAL" "$detail"
-  TUI_TASK_CURRENT=$((TUI_TASK_CURRENT + 1))
+  TUI_MODULE_ACTIVE=1
+  TUI_MODULE_PROGRESS=0
   "$fn"
+  TUI_MODULE_ACTIVE=0
+  TUI_TASK_CURRENT=$((TUI_TASK_CURRENT + 1))
+  TUI_LAST_OVERALL_PERMILLE=$((TUI_TASK_CURRENT * 1000 / TUI_TASK_TOTAL))
   tui_progress "Borrado" "$TUI_TASK_CURRENT" "$TUI_TASK_TOTAL" "Completado: $label"
   c_ok "Módulo completado: $label"
 }
@@ -183,7 +272,9 @@ run_spin() {
     printf '    \033[2m(dry-run)\033[0m %s\n' "$cmd"
     return 0
   fi
-  eval "$cmd" &
+  local output_file
+  output_file=$(mktemp "${TMPDIR:-/tmp}/clean-spin.XXXXXX") || return 1
+  eval "$cmd" >"$output_file" 2>&1 &
   local pid=$! i=0
   while kill -0 "$pid" 2>/dev/null; do
     printf "\r    \033[1;34m${SPIN[$i]}\033[0m %s" "$msg"
@@ -192,10 +283,17 @@ run_spin() {
   done
   wait "$pid"
   local rc=$?
+  printf '\r\033[2K'
+  if [ -s "$output_file" ]; then
+    while IFS= read -r line || [ -n "$line" ]; do
+      printf '      %s\n' "$line"
+    done < "$output_file"
+  fi
+  rm -f -- "$output_file"
   if [ $rc -eq 0 ]; then
-    printf "\r    \033[1;32m✓\033[0m %s\n" "$msg"
+    printf "    \033[1;32m✓\033[0m %s\n" "$msg"
   else
-    printf "\r    \033[1;33m!\033[0m %s (código $rc)\n" "$msg"
+    printf "    \033[1;33m!\033[0m %s (código $rc)\n" "$msg"
   fi
   return $rc
 }
@@ -1263,6 +1361,8 @@ clean_status() {
 
 # ------------------------------------------------------------------ main
 main() {
+  trap 'tui_live_abort' EXIT
+  trap 'tui_live_abort; exit 130' HUP INT TERM
   [ $# -eq 0 ] && usage 1
 
   local do_temp=0 do_cache=0 do_logs=0 do_trash=0 do_thumbs=0 do_drives=0 do_browsers=0 do_ram=0 do_user_cache=0 do_dev=0 do_junk=0 do_wine=0 do_media=0 do_games=0 do_venv=0 do_apt_check=0 do_status=0 do_all=0
@@ -1567,8 +1667,10 @@ main() {
 
   TUI_TASK_TOTAL=$((do_temp+do_cache+do_logs+do_trash+do_thumbs+do_browsers+do_ram+do_drives+do_user_cache+do_dev+do_junk+do_wine+do_media+do_games+do_venv+do_apt_check))
   TUI_TASK_CURRENT=0
+  TUI_LAST_OVERALL_PERMILLE=0
   if [ "$TUI_TASK_TOTAL" -gt 0 ]; then
     tui_header "CLEANER TUI 2026 -- Borrado y limpieza"
+    tui_live_start
   fi
 
   [ "$do_temp"   -eq 1 ] && tui_run_task "Temp" "Eliminando temporales del sistema" clean_temp
@@ -1587,6 +1689,8 @@ main() {
   [ "$do_games" -eq 1 ] && tui_run_task "Games" "Limpiando cachés de juegos y launchers" clean_games
   [ "$do_venv" -eq 1 ] && tui_run_task "PythonVenv" "Limpiando entornos virtuales Python huérfanos" clean_venv
   [ "$do_apt_check" -eq 1 ] && tui_run_task "AptCheck" "Revisando fuentes APT con errores" clean_apt_check
+
+  tui_live_stop
 
   after=$(df --output=used / 2>/dev/null | tail -1 || echo 0)
   if [ "$DRY_RUN" -eq 0 ] && [ "$before" -gt "$after" ] 2>/dev/null; then

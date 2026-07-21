@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.6.2 - 2026-07-21
+
+- Reserva la ultima fila de la terminal para mantener fija la barra de progreso global.
+- Los mensajes y resultados se desplazan por encima sin mover el indicador.
+- Restaura los margenes y el cursor de la terminal al finalizar o interrumpir la limpieza.
+- Mantiene una salida convencional cuando el comando no se ejecuta en una terminal interactiva.
+
+## 1.6.1 - 2026-07-21
+
+- La barra granular ahora representa progreso global acumulado y no se reinicia por cada directorio.
+- El porcentaje nunca retrocede y solo alcanza `100%` al terminar el ultimo modulo.
+- Limita las cabeceras a 100 columnas en terminales anchas.
+- Aisla la salida de comandos largos para evitar que se mezcle con el spinner.
+
 ## 1.6.0 - 2026-07-21
 
 - Nueva barra de progreso granular actualizada sobre una sola linea.

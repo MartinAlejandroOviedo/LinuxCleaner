@@ -1,12 +1,12 @@
 Package: clean-debian
-Version: 1.6.0
+Version: 1.6.2
 Section: admin
 Priority: optional
 Architecture: all
 Depends: coreutils, findutils, util-linux
 Recommends: apt, sudo
 Maintainer: Martin <martin@debian>
-Installed-Size: 92
+Installed-Size: 96
 Description: Limpiador de archivos temporales y residuales para Debian
  Proporciona el comando "clean" para eliminar de forma segura archivos
  temporales, caches de paquetes (APT/DNF/Pacman/Portage), logs, coredumps,
