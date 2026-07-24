@@ -6,7 +6,7 @@
 ![Static Badge](https://img.shields.io/badge/fedora-supported-blue?logo=fedora)
 ![Static Badge](https://img.shields.io/badge/arch-supported-blue?logo=archlinux)
 ![Static Badge](https://img.shields.io/badge/license-MIT-green)
-![Static Badge](https://img.shields.io/badge/version-1.6.2-white)
+![Static Badge](https://img.shields.io/badge/version-1.6.3-white)
 
 ```bash
 $ clean --all
@@ -61,8 +61,12 @@ $ clean --all
 ### Desde .deb (Debian/Ubuntu)
 
 ```bash
-sudo apt install ./releases/clean-debian_1.6.2_all.deb
+sudo apt install ./releases/clean-debian_1.6.3_all.deb
 ```
+
+La versión 1.6.3 corrige la estructura interna del paquete para que APT 3
+(incluido en Debian 13) reconozca correctamente `debian-binary`,
+`control.tar.xz` y `data.tar.xz`.
 
 ### Manual (cualquier distro)
 
@@ -242,7 +246,7 @@ Busca en `/tmp`, `/var/tmp`, `~/Downloads`, `~/Desktop`, `~/Documentos` y `~/Esc
 ```bash
 cd pkg
 mkdir -p ../releases
-dpkg-deb --root-owner-group --build clean-debian ../releases/clean-debian_1.6.2_all.deb
+dpkg-deb --root-owner-group --build clean-debian ../releases/clean-debian_1.6.3_all.deb
 ```
 
 ## 📄 Licencia
