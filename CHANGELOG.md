@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.6.3 - 2026-07-24
+
+- Corrige la estructura interna del paquete `.deb` para instalarlo con APT 3 en Debian 13.
+- Elimina las barras finales que algunas versiones de `ar` agregaban a los miembros `debian-binary`, `control.tar.xz` y `data.tar.xz`.
+- Documenta la compatibilidad del paquete con Debian 13.
+- Gracias a [@abejaranoh](https://github.com/abejaranoh) por reportar el problema y comprobarlo tanto en la versión 1.3.0 como en la 1.6.2.
+
 ## 1.6.2 - 2026-07-21
 
 - Reserva la ultima fila de la terminal para mantener fija la barra de progreso global.
