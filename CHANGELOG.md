@@ -6,6 +6,8 @@
 - Agrega definición de paquete RPM `noarch`.
 - Agrega manifiesto Flatpak con ejecución controlada en el sistema anfitrión.
 - Sincroniza la versión de la aplicación y de los paquetes en 1.6.4.
+- Documenta instalación, actualización, desinstalación y construcción para
+  paquetes DEB, RPM y Flatpak.
 
 ## 1.6.3 - 2026-07-24
 

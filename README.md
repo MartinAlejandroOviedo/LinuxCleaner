@@ -58,37 +58,73 @@ $ clean --all
 
 ## 📦 Instalación
 
+La versión actual es **1.6.4**. Podés comprobar qué versión quedó instalada
+con:
+
+```bash
+clean --version
+# Linux Cleaner 1.6.4
+```
+
 ### Desde .deb (Debian/Ubuntu)
 
 ```bash
 sudo apt install ./releases/clean-debian_1.6.4_all.deb
 ```
 
+APT reemplaza automáticamente una versión anterior del paquete.
+
 ### Desde RPM (Fedora/RHEL/openSUSE)
 
 ```bash
+# Fedora/RHEL
 sudo dnf install ./releases/clean-debian-1.6.4-1*.noarch.rpm
+
+# openSUSE
+sudo zypper install ./releases/clean-debian-1.6.4-1*.noarch.rpm
 ```
 
-El archivo RPM se genera con `./packaging/build-rpm.sh`. Requiere `rpmbuild`.
+El nombre final puede incluir el identificador de la distribución, por ejemplo
+`.fc42`. El comodín del comando contempla esa variante.
 
 ### Desde Flatpak
 
 ```bash
-./packaging/build-flatpak.sh
 flatpak install --user ./releases/LinuxCleaner-1.6.4.flatpak
 flatpak run io.github.MartinAlejandroOviedo.LinuxCleaner
 ```
 
 El paquete usa `flatpak-spawn` para ejecutar el limpiador en el host, ya que
 necesita acceder a cachés, logs y gestores de paquetes fuera del sandbox.
-La construcción requiere `flatpak-builder` y el runtime Freedesktop 25.08.
+Por ese motivo solicita acceso al servicio `org.freedesktop.Flatpak`.
 
 ### Manual (cualquier distro)
 
 ```bash
 sudo cp clean /usr/local/bin/clean
 sudo chmod +x /usr/local/bin/clean
+```
+
+### Actualizar o desinstalar
+
+Para actualizar, instalá el paquete nuevo con el mismo método utilizado
+originalmente. Para desinstalar:
+
+```bash
+# Debian/Ubuntu
+sudo apt remove clean-debian
+
+# Fedora/RHEL
+sudo dnf remove clean-debian
+
+# openSUSE
+sudo zypper remove clean-debian
+
+# Flatpak
+flatpak uninstall --user io.github.MartinAlejandroOviedo.LinuxCleaner
+
+# Instalación manual
+sudo rm /usr/local/bin/clean
 ```
 
 ## 🚀 Uso
@@ -256,20 +292,77 @@ Busca en `/tmp`, `/var/tmp`, `~/Downloads`, `~/Desktop`, `~/Documentos` y `~/Esc
 ## 📋 Requisitos
 
 - Linux con bash 4+
-- Dependencias: `coreutils`, `findutils`, `util-linux` (vienen preinstaladas en toda distro)
+- Dependencias: `coreutils`, `findutils`, `util-linux`
 - Opcional según módulo: `apt`, `dnf`, `pacman`, `sudo`
+- Para construir DEB: `ar`, `tar` y `xz`
+- Para construir RPM: `rpmbuild`
+- Para construir Flatpak: `flatpak`, `flatpak-builder` y el runtime Freedesktop 25.08
 
-## 🏗️ Construir el .deb
+## 🏗️ Construir paquetes
+
+Los constructores toman la versión 1.6.4 del repositorio y dejan los resultados
+en `releases/`.
+
+### Debian/Ubuntu
 
 ```bash
-cd pkg
-mkdir -p ../releases
-dpkg-deb --root-owner-group --build clean-debian ../releases/clean-debian_1.6.4_all.deb
+./packaging/build-deb.sh
+```
+
+Resultado:
+
+```text
+releases/clean-debian_1.6.4_all.deb
+```
+
+### Fedora/RHEL/openSUSE
+
+En Fedora, instalá primero las herramientas de construcción:
+
+```bash
+sudo dnf install rpm-build
+./packaging/build-rpm.sh
+```
+
+El script genera el RPM binario `noarch` y el RPM fuente.
+
+### Flatpak
+
+Con el SDK y runtime Freedesktop 25.08 instalados:
+
+```bash
+./packaging/build-flatpak.sh
+```
+
+Resultado:
+
+```text
+releases/LinuxCleaner-1.6.4.flatpak
+```
+
+El manifiesto está en
+`packaging/flatpak/io.github.MartinAlejandroOviedo.LinuxCleaner.yml` y utiliza
+el identificador `io.github.MartinAlejandroOviedo.LinuxCleaner`.
+
+## 🗂️ Archivos de distribución
+
+```text
+packaging/
+├── build-deb.sh
+├── build-rpm.sh
+├── build-flatpak.sh
+├── rpm/
+│   └── clean-debian.spec
+└── flatpak/
+    ├── clean-debian-flatpak
+    ├── io.github.MartinAlejandroOviedo.LinuxCleaner.yml
+    ├── io.github.MartinAlejandroOviedo.LinuxCleaner.desktop
+    └── io.github.MartinAlejandroOviedo.LinuxCleaner.metainfo.xml
 ```
 
 ## 📄 Licencia
 
-MIT
+Distribuido bajo la licencia MIT. Consultá el archivo [LICENSE](LICENSE).
 
 ---
 
