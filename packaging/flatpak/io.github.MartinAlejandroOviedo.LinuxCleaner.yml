@@ -1,0 +1,18 @@
+app-id: io.github.MartinAlejandroOviedo.LinuxCleaner
+runtime: org.freedesktop.Platform
+runtime-version: "25.08"
+sdk: org.freedesktop.Sdk
+command: clean-debian-flatpak
+finish-args:
+  - --talk-name=org.freedesktop.Flatpak
+modules:
+  - name: linux-cleaner
+    buildsystem: simple
+    build-commands:
+      - install -Dm0755 clean /app/libexec/clean-debian/clean
+      - install -Dm0755 packaging/flatpak/clean-debian-flatpak /app/bin/clean-debian-flatpak
+      - install -Dm0644 packaging/flatpak/io.github.MartinAlejandroOviedo.LinuxCleaner.desktop /app/share/applications/io.github.MartinAlejandroOviedo.LinuxCleaner.desktop
+      - install -Dm0644 packaging/flatpak/io.github.MartinAlejandroOviedo.LinuxCleaner.metainfo.xml /app/share/metainfo/io.github.MartinAlejandroOviedo.LinuxCleaner.metainfo.xml
+    sources:
+      - type: dir
+        path: ../..

@@ -1,0 +1,6 @@
+#!/bin/sh
+set -eu
+
+app_id="io.github.MartinAlejandroOviedo.LinuxCleaner"
+location=$(flatpak-spawn --host flatpak info --show-location "$app_id")
+exec flatpak-spawn --host "$location/files/libexec/clean-debian/clean" "$@"

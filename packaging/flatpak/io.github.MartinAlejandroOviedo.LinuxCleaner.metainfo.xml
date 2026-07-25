@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="console-application">
+  <id>io.github.MartinAlejandroOviedo.LinuxCleaner</id>
+  <name>Linux Cleaner</name>
+  <summary>Limpia archivos temporales y datos regenerables de Linux</summary>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
+  <description>
+    <p>Linux Cleaner elimina de forma interactiva archivos temporales, cachés,
+    logs y otros datos regenerables del sistema.</p>
+  </description>
+  <launchable type="desktop-id">io.github.MartinAlejandroOviedo.LinuxCleaner.desktop</launchable>
+  <releases>
+    <release version="1.6.4" date="2026-07-24"/>
+  </releases>
+  <url type="homepage">https://github.com/MartinAlejandroOviedo/LinuxCleaner</url>
+</component>

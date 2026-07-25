@@ -27,10 +27,12 @@
 #   -n, --dry-run   Muestra lo que se haría sin borrar nada
 #   -I, --interactive TUI con progreso y confirmación antes de borrar
 #   -y, --yes       Omite la confirmación interactiva (útil con --all)
+#   -v, --version   Muestra la versión instalada
 #   -h, --help      Muestra esta ayuda
 #
 set -uo pipefail
 
+VERSION="1.6.4"
 DRY_RUN=0
 INTERACTIVE=0
 NO_CONFIRM=0
@@ -394,6 +396,7 @@ Opciones:
   -n, --dry-run   Muestra lo que se haría sin borrar nada
   -I, --interactive TUI con progreso y confirmación antes de borrar
   -y, --yes       Omite la confirmación interactiva (útil con --all)
+  -v, --version   Muestra la versión instalada
   -h, --help      Muestra esta ayuda
 EOF
   exit "${1:-0}"
@@ -1390,6 +1393,7 @@ main() {
       -n|--dry-run) DRY_RUN=1 ;;
       -I|--interactive) INTERACTIVE=1 ;;
       -y|--yes)     NO_CONFIRM=1 ;;
+      -v|--version) printf 'Linux Cleaner %s\n' "$VERSION"; exit 0 ;;
       -h|--help)    usage 0 ;;
       *) c_err "Opción desconocida: $1"; usage 1 ;;
     esac

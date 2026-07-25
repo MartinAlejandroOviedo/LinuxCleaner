@@ -6,7 +6,7 @@
 ![Static Badge](https://img.shields.io/badge/fedora-supported-blue?logo=fedora)
 ![Static Badge](https://img.shields.io/badge/arch-supported-blue?logo=archlinux)
 ![Static Badge](https://img.shields.io/badge/license-MIT-green)
-![Static Badge](https://img.shields.io/badge/version-1.6.3-white)
+![Static Badge](https://img.shields.io/badge/version-1.6.4-white)
 
 ```bash
 $ clean --all
@@ -61,12 +61,28 @@ $ clean --all
 ### Desde .deb (Debian/Ubuntu)
 
 ```bash
-sudo apt install ./releases/clean-debian_1.6.3_all.deb
+sudo apt install ./releases/clean-debian_1.6.4_all.deb
 ```
 
-La versión 1.6.3 corrige la estructura interna del paquete para que APT 3
-(incluido en Debian 13) reconozca correctamente `debian-binary`,
-`control.tar.xz` y `data.tar.xz`.
+### Desde RPM (Fedora/RHEL/openSUSE)
+
+```bash
+sudo dnf install ./releases/clean-debian-1.6.4-1*.noarch.rpm
+```
+
+El archivo RPM se genera con `./packaging/build-rpm.sh`. Requiere `rpmbuild`.
+
+### Desde Flatpak
+
+```bash
+./packaging/build-flatpak.sh
+flatpak install --user ./releases/LinuxCleaner-1.6.4.flatpak
+flatpak run io.github.MartinAlejandroOviedo.LinuxCleaner
+```
+
+El paquete usa `flatpak-spawn` para ejecutar el limpiador en el host, ya que
+necesita acceder a cachés, logs y gestores de paquetes fuera del sandbox.
+La construcción requiere `flatpak-builder` y el runtime Freedesktop 25.08.
 
 ### Manual (cualquier distro)
 
@@ -83,6 +99,7 @@ clean --all --yes            # limpia todo sin preguntar (cron/scripts)
 clean --all --dry-run        # simulación: muestra qué haría sin borrar
 clean --browsers --dev       # solo tareas específicas
 clean --status               # reporte de espacio ocupado
+clean --version              # muestra la versión instalada
 clean --help                 # ayuda completa
 ```
 
@@ -134,6 +151,7 @@ Progreso global: [########################        ]  75%  Cache npm (3/4)
 | `-n` | `--dry-run` | Modo simulación (no borra nada) |
 | `-I` | `--interactive` | TUI con progreso y confirmación (implícito con `--all`) |
 | `-y` | `--yes` | Omite la confirmación (útil con `--all` en scripts) |
+| `-v` | `--version` | Muestra la versión instalada |
 | `-h` | `--help` | Ayuda |
 
 ## 🛡️ Seguridad
@@ -246,7 +264,7 @@ Busca en `/tmp`, `/var/tmp`, `~/Downloads`, `~/Desktop`, `~/Documentos` y `~/Esc
 ```bash
 cd pkg
 mkdir -p ../releases
-dpkg-deb --root-owner-group --build clean-debian ../releases/clean-debian_1.6.3_all.deb
+dpkg-deb --root-owner-group --build clean-debian ../releases/clean-debian_1.6.4_all.deb
 ```
 
 ## 📄 Licencia

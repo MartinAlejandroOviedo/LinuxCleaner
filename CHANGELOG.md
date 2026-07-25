@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.6.4 - 2026-07-24
+
+- Agrega `clean -v` y `clean --version`.
+- Agrega definición de paquete RPM `noarch`.
+- Agrega manifiesto Flatpak con ejecución controlada en el sistema anfitrión.
+- Sincroniza la versión de la aplicación y de los paquetes en 1.6.4.
+
 ## 1.6.3 - 2026-07-24
 
 - Corrige la estructura interna del paquete `.deb` para instalarlo con APT 3 en Debian 13.
