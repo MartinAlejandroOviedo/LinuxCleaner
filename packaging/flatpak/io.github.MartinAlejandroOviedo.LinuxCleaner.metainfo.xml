@@ -11,7 +11,7 @@
   </description>
   <launchable type="desktop-id">io.github.MartinAlejandroOviedo.LinuxCleaner.desktop</launchable>
   <releases>
-    <release version="1.6.4" date="2026-07-24"/>
+    <release version="1.6.5" date="2026-07-28"/>
   </releases>
   <url type="homepage">https://github.com/MartinAlejandroOviedo/LinuxCleaner</url>
 </component>

@@ -1,5 +1,5 @@
 Name:           clean-debian
-Version:        1.6.4
+Version:        1.6.5
 Release:        1%{?dist}
 Summary:        Limpiador de archivos temporales y residuales para Linux
 License:        MIT
@@ -34,5 +34,5 @@ install -Dm0644 pkg/clean-debian/usr/share/applications/clean-debian.desktop \
 %{_datadir}/applications/clean-debian.desktop
 
 %changelog
-* Fri Jul 24 2026 Martin <martin@debian> - 1.6.4-1
+* Tue Jul 28 2026 Martin <martin@debian> - 1.6.5-1
 - Agregar salida de version y paquetes RPM/Flatpak.

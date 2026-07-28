@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.6.5 - 2026-07-28
+
+- Refactor visual completo de la TUI: barras de progreso con gradiente (`█▓▒░`),
+  separadores Unicode (`─`), iconos modernos (` ℹ ` ` ✔ ` ` ⚡ ` ` ✘ `).
+- La barra usa `·` (punto medio) para el espacio vacio, eliminando el ruido
+  visual del caracter `░`.
+- `c_section` ahora ocupa el ancho completo de la terminal.
+- Spinner con colores ciclicos degradados durante operaciones largas.
+- README renovado: badges flat-square, tabla de contenidos, modulos colapsables.
+- Prompt de confirmacion con prefijo `▸` en cian.
+
 ## 1.6.4 - 2026-07-24
 
 - Agrega `clean -v` y `clean --version`.

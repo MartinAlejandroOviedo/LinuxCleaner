@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-version="1.6.4"
+version="1.6.5"
 project_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 package_root="$project_root/pkg/clean-debian"
 work_dir=$(mktemp -d)
