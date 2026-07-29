@@ -102,9 +102,25 @@ clean --version
 
 ### Debian/Ubuntu (.deb)
 
+Desde un clon del repositorio:
+
 ```bash
 sudo apt install ./releases/clean-debian_1.6.5_all.deb
 ```
+
+O descargando directamente el paquete:
+
+```bash
+curl --fail --location \
+  --output clean-debian_1.6.5_all.deb \
+  https://raw.githubusercontent.com/MartinAlejandroOviedo/LinuxCleaner/master/releases/clean-debian_1.6.5_all.deb
+dpkg-deb --info ./clean-debian_1.6.5_all.deb
+sudo apt install ./clean-debian_1.6.5_all.deb
+```
+
+`curl --fail` evita guardar una respuesta HTTP de error con extensión `.deb`.
+`dpkg-deb --info` comprueba que el archivo descargado sea un paquete Debian
+válido antes de instalarlo.
 
 APT reemplaza automáticamente una versión anterior del paquete.
 
@@ -379,6 +395,7 @@ Los constructores toman la versión 1.6.5 del repositorio y dejan los resultados
 
 ```bash
 ./packaging/build-deb.sh
+dpkg-deb --info ./releases/clean-debian_1.6.5_all.deb
 ```
 
 ```

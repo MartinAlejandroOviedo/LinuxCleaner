@@ -10,6 +10,9 @@
 - Spinner con colores ciclicos degradados durante operaciones largas.
 - README renovado: badges flat-square, tabla de contenidos, modulos colapsables.
 - Prompt de confirmacion con prefijo `▸` en cian.
+- Paquetes DEB, RPM y Flatpak regenerados el 2026-07-29.
+- Corrige la versión interna del paquete DEB, que todavía declaraba `1.6.4`.
+- Documenta una descarga segura del DEB con validación HTTP y de metadata.
 
 ## 1.6.4 - 2026-07-24
 
