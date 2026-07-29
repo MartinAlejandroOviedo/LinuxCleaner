@@ -1,5 +1,5 @@
 Package: clean-debian
-Version: 1.6.4
+Version: 1.6.5
 Section: admin
 Priority: optional
 Architecture: all
